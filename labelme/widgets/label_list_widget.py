@@ -22,13 +22,36 @@ def format_label_with_color_dot(text: str, color: tuple[int, int, int]) -> str:
     return f'{html.escape(text)} <font color="#{r:02x}{g:02x}{b:02x}">●</font>'
 
 
+# 源程序的展示label方法
+# def format_shape_label(shape: Shape) -> str:
+#     assert shape.label is not None
+#     if shape.group_id is None:
+#         text = shape.label
+#     else:
+#         text = f"{shape.label} ({shape.group_id})"
+#     return format_label_with_color_dot(text=text, color=shape.fill_color.getRgb()[:3])
+
+
+# 定义我们自己的展示更详细一些的标签方法
 def format_shape_label(shape: Shape) -> str:
-    assert shape.label is not None
-    if shape.group_id is None:
-        text = shape.label
-    else:
-        text = f"{shape.label} ({shape.group_id})"
-    return format_label_with_color_dot(text=text, color=shape.fill_color.getRgb()[:3])
+    node_id = getattr(shape, "node_id", "")
+    label_type = shape.label or ""
+    group_id = shape.group_id if shape.group_id is not None else ""
+    transcription = getattr(shape, "transcription", "")
+
+    parts = []
+    if node_id:
+        parts.append(str(node_id))
+    if label_type:
+        parts.append(str(label_type))
+    if group_id != "":
+        parts.append(str(group_id))
+    if transcription:
+        # 消除换行符，并截断过长的转写文本，保持 UI 整洁
+        t_str = str(transcription).replace("\n", " ")
+        parts.append(t_str[:15] + ("..." if len(t_str) > 15 else ""))
+
+    return " | ".join(parts) if parts else "Unnamed"
 
 
 class HTMLDelegate(QtWidgets.QStyledItemDelegate):
@@ -262,7 +285,9 @@ class LabelListWidget(QtWidgets.QListView):
         if not isinstance(item, LabelListWidgetItem):
             raise TypeError("item must be LabelListWidgetItem")
         self._model.setItem(self._model.rowCount(), 0, item)
-        item.setSizeHint(self.itemDelegate().sizeHint(None, None))  # ty: ignore[invalid-argument-type]
+        item.setSizeHint(
+            self.itemDelegate().sizeHint(None, None)
+        )  # ty: ignore[invalid-argument-type]
 
     def remove_item(self, item: LabelListWidgetItem) -> None:
         index = self._model.indexFromItem(item)

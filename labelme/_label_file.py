@@ -32,6 +32,13 @@ class ShapeDict(TypedDict):
     mask: NDArray[np.bool_] | None
     other_data: dict
 
+    # 增加我们需要标注的字段
+    node_id: str
+    type: str
+    transcription: str
+    attributes: dict[str, Any]
+    edges: list[dict[str, str]]
+
 
 def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
     SHAPE_KEYS: set[str] = {
@@ -42,7 +49,18 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
         "flags",
         "description",
         "mask",
+        # 标注项目的字段
+        "node_id",
+        "type",
+        "transcription",
+        "attributes",
+        "edges",
     }
+
+    # 因为Labelme UI依赖label这个变量 但是我们的JSON里面没有
+    # 所以直接进行赋值
+    if "label" not in shape_json_obj and "type" in shape_json_obj:
+        shape_json_obj["label"] = shape_json_obj["type"]
 
     if "label" not in shape_json_obj:
         raise ValueError(f"label is required: {shape_json_obj}")
@@ -65,8 +83,13 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
         raise ValueError(f"points must be list of [x, y]: {shape_json_obj['points']}")
     points: list[list[float]] = shape_json_obj["points"]
 
+    # 我们的逻辑：没有该变量 就设置默认值为多边形
     if "shape_type" not in shape_json_obj:
-        raise ValueError(f"shape_type is required: {shape_json_obj}")
+        shape_json_obj["shape_type"] = "polygon"
+
+    # 原文件逻辑：没有shape_type 直接报错弹出
+    # if "shape_type" not in shape_json_obj:
+    #     raise ValueError(f"shape_type is required: {shape_json_obj}")
     if not isinstance(shape_json_obj["shape_type"], str):
         raise TypeError(f"shape_type must be str: {shape_json_obj['shape_type']}")
     shape_type: str = shape_json_obj["shape_type"]
@@ -104,6 +127,19 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
             )
         mask = utils.img_b64_to_arr(shape_json_obj["mask"]).astype(bool)
 
+    # 对额外需要的数据进行提取和初始化
+    node_id: str = shape_json_obj.get("node_id", "")
+    type_val: str = shape_json_obj.get("type", label)  # 默认回退为 label
+    transcription: str = shape_json_obj.get("transcription", "")
+
+    # Attributes: z_index (图层深度) 和 color (色彩)
+    attributes: dict = shape_json_obj.get(
+        "attributes", {"z_index": 0, "color": "black"}
+    )
+
+    # Edges: 关系边
+    edges: list = shape_json_obj.get("edges", [])
+
     other_data = {k: v for k, v in shape_json_obj.items() if k not in SHAPE_KEYS}
 
     loaded: ShapeDict = ShapeDict(
@@ -115,6 +151,12 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
         group_id=group_id,
         mask=mask,
         other_data=other_data,
+        # 封装额外字段
+        node_id=node_id,
+        type=type_val,
+        transcription=transcription,
+        attributes=attributes,
+        edges=edges,
     )
     if set(loaded.keys()) != SHAPE_KEYS | {"other_data"}:
         raise RuntimeError(

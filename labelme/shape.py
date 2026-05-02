@@ -49,6 +49,12 @@ class Shape:
         group_id: int | None = None,
         description: str | None = None,
         mask: npt.NDArray[np.bool_] | None = None,
+        # ===增加我们需要的专属参数专属参数 ===
+        node_id: str = "",
+        type: str = "",
+        transcription: str = "",
+        attributes: dict[str, Any] | None = None,
+        edges: list[dict[str, str]] | None = None,
     ) -> None:
         self.label = label
         self.group_id = group_id
@@ -67,6 +73,22 @@ class Shape:
         self.mask = mask
         self._closed = False
         self.highlight: _Highlight | None = None
+
+        #  绑定手稿项目专属属性至实例
+        self.node_id = node_id
+        # 如果没有单独传 type，就默认取 label 的值
+        self.type = type if type else (label if label else "")
+        self.transcription = transcription
+        # 设置默认的图层深度和颜色属性
+        self.attributes = (
+            attributes if attributes is not None else {"z_index": 0, "color": "black"}
+        )
+        # 初始化逻辑边数组
+        self.edges = edges if edges is not None else []
+
+        if line_color is not None:
+            # Per-instance line color override (used for the pending line).
+            self.line_color = line_color
 
         if line_color is not None:
             # Per-instance line color override (used for the pending line).

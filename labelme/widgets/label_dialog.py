@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+# 我们加入这个库为了排查错误
+import traceback
+from loguru import logger
+
 import re
 from typing import cast
+from typing import Any
 
 from loguru import logger
 from PyQt5 import QtCore
@@ -14,15 +19,35 @@ import labelme.utils
 # - Calculate optimal position so as not to go out of screen area.
 
 
-class LabelQLineEdit(QtWidgets.QLineEdit):
-    def set_list_widget(self, list_widget: QtWidgets.QListWidget) -> None:
-        self.list_widget = list_widget
+# 这是我们增加的Type下拉框逻辑
+class LabelQComboBox(QtWidgets.QComboBox):
+    # 设计一个下拉框 用来选取节点的Type
+    def text(self):
+        return self.currentText()
 
-    def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
-        if a0.key() in [QtCore.Qt.Key_Up, QtCore.Qt.Key_Down]:
-            self.list_widget.keyPressEvent(a0)
-        else:
-            super().keyPressEvent(a0)
+    def setText(self, text):
+        self.setCurrentText(text)
+
+    def setSelection(self, start, length):
+        pass  # 下拉框不需要光标选中功能，直接 pass
+
+    def setCompleter(self, completer):
+        pass  # 下拉框自带补全，屏蔽原版的 completer
+
+    def set_list_widget(self, list_widget):
+        pass
+
+
+# 这是源代码的Type文本框逻辑
+# class LabelQLineEdit(QtWidgets.QLineEdit):
+#     def set_list_widget(self, list_widget: QtWidgets.QListWidget) -> None:
+#         self.list_widget = list_widget
+
+#     def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
+#         if a0.key() in [QtCore.Qt.Key_Up, QtCore.Qt.Key_Down]:
+#             self.list_widget.keyPressEvent(a0)
+#         else:
+#             super().keyPressEvent(a0)
 
 
 class LabelDialog(QtWidgets.QDialog):
@@ -42,33 +67,131 @@ class LabelDialog(QtWidgets.QDialog):
         self._fit_to_content = fit_to_content
 
         super().__init__(parent)
-        self.edit = LabelQLineEdit()
-        self.edit.setPlaceholderText(text)
-        self.edit.setValidator(labelme.utils.label_validator())
-        self.edit.editingFinished.connect(self._on_editing_finished)
+        self.setWindowTitle("手稿节点属性配置")
+        # 原有的基础控件（NodeType&GroupID）
+        # self.edit = LabelQLineEdit() # 这是原本的节点初始化 手动填
+        # 我们这里用下拉框进行选择
+        self.edit = LabelQComboBox()
+        self.edit.setEditable(True)  # 允许模糊搜索
+
+        self.edit.lineEdit().setPlaceholderText(text)
+
+        # 加入所有需要的文本节点类型
+        node_types = [
+            "MAIN_TEXT",
+            "INTERLINEAR_ANNOTATION",
+            "SIDE_MARGINALIA",
+            "ADD_TEXT",
+            "DELETE_TEXT",
+            "SYMBOL_PLACEHOLDER",
+            "SALUTATION",
+            "INCEPTION",
+            "WISH_CLOSING",
+            "SIGNATURE",
+            "DATE_LINE",
+            "COLUMN_SEPARATOR",
+            "INK_BLOT",
+            "PUNCTUATION_MARK",
+            "EDIT_MARK:insertion_mark",
+            "EDIT_MARK:inversion_mark",
+            "EDIT_MARK:deletion_line",
+            "EDIT_MARK:comment_mark",
+        ]
+        self.edit.addItems([""] + node_types)  # 第一个留空
+
+        # self.edit.setPlaceholderText(text)
+        # self.edit.setValidator(labelme.utils.label_validator())
+        # self.edit.editingFinished.connect(self._on_editing_finished)
         if flags:
-            self.edit.textChanged.connect(self._on_text_changed)
+            # self.edit.textChanged.connect(self._on_text_changed)
+            # 换成我们的box版本
+            self.edit.currentTextChanged.connect(self._on_text_changed)
         self.edit_group_id = QtWidgets.QLineEdit()
-        self.edit_group_id.setPlaceholderText("Group ID")
+        self.edit_group_id.setPlaceholderText("Group ID(划分句子用)")
         self.edit_group_id.setValidator(
             QtGui.QRegExpValidator(QtCore.QRegExp(r"\d*"), None)
         )
+
+        # 我们需要的特殊控件
+        # 1. Node ID
+        self.edit_node_id = QtWidgets.QLineEdit()
+        self.edit_node_id.setPlaceholderText("Node ID (如: n_main_1)")
+
+        # 2. Transcription (转写内容)
+        self.edit_transcription = QtWidgets.QTextEdit()
+        self.edit_transcription.setPlaceholderText("转写文本 (Transcription)")
+        self.edit_transcription.setFixedHeight(50)
+
+        # 3. Z-Index (图层深度)
+        self.combo_z_index = QtWidgets.QComboBox()
+        self.combo_z_index.addItems(
+            [
+                "0 - 纸张/界格线",
+                "1 - 正文/夹注",
+                "2 - 批注/标点",
+                "3 - 增补/涂改",
+                "4 - 印章/墨渍",
+            ]
+        )
+
+        # 4. Color (颜色)
+        self.combo_color = QtWidgets.QComboBox()
+        self.combo_color.addItems(["black", "red", "other"])
+
+        # 5. Edges (单条逻辑边快速配置，复杂情况建议后期或二次开发列表)
+        self.edit_target_id = QtWidgets.QLineEdit()
+        self.edit_target_id.setPlaceholderText("目标 Node ID")
+        self.combo_relation = QtWidgets.QComboBox()
+        self.combo_relation.addItems(
+            [
+                "",  # 默认无边
+                "READS_AFTER",
+                "ANNOTATES",
+                "INSERTS_AT",
+                "REPLACES",
+                "OVERLAPS",
+                "REPRESENTS",
+            ]
+        )
+        # 组装配件
         layout = QtWidgets.QVBoxLayout()
+        # 第一行：NodeType和GroupID
         if show_text_field:
             layout_edit = QtWidgets.QHBoxLayout()
+            layout_edit.addWidget(QtWidgets.QLabel("节点类型(Type):"))
             layout_edit.addWidget(self.edit, 6)
+            layout_edit.addWidget(QtWidgets.QLabel("所属组(Group ID):"))
             layout_edit.addWidget(self.edit_group_id, 2)
             layout.addLayout(layout_edit)
-        # buttons
-        bb = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
-            self,
+        # 第二行：NodeID和 快捷属性下拉
+        layout_attr = QtWidgets.QHBoxLayout()
+        layout_attr.addWidget(QtWidgets.QLabel("节点 ID:"))
+        layout_attr.addWidget(self.edit_node_id, 4)
+        layout_attr.addWidget(QtWidgets.QLabel("图层(Z):"))
+        layout_attr.addWidget(self.combo_z_index, 3)
+        layout_attr.addWidget(QtWidgets.QLabel("颜色(Color):"))
+        layout_attr.addWidget(self.combo_color, 2)
+        layout.addLayout(layout_attr)
+        # 第三行：转写文本
+        layout.addWidget(QtWidgets.QLabel("文本转写 (Transcription):"))
+        layout.addWidget(self.edit_transcription)
+        # 第四行：逻辑边配置(表格)
+        layout_edge_header = QtWidgets.QHBoxLayout()
+        layout_edge_header.addWidget(QtWidgets.QLabel("逻辑边配置 (Edges):"))
+        self.btn_add_edge = QtWidgets.QPushButton("➕ 添加一条关系边")
+        self.btn_add_edge.clicked.connect(lambda: self._add_edge_row())
+        layout_edge_header.addWidget(self.btn_add_edge)
+        layout.addLayout(layout_edge_header)
+        # 创建一个 2 列的表格
+        self.edges_table = QtWidgets.QTableWidget(0, 2)
+        self.edges_table.setHorizontalHeaderLabels(
+            ["目标 Node ID", "关系类型(Relation)"]
         )
-        bb.accepted.connect(self._validate)
-        bb.rejected.connect(self.reject)
-        layout.addWidget(bb)
-        # label_list
+        self.edges_table.horizontalHeader().setStretchLastSection(True)
+        self.edges_table.setFixedHeight(100)
+        layout.addWidget(self.edges_table)
+
+        # label_list 候选列表
         self.label_list = QtWidgets.QListWidget()
         if self._fit_to_content["row"]:
             self.label_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
@@ -83,21 +206,39 @@ class LabelDialog(QtWidgets.QDialog):
             self.label_list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
         self.label_list.currentItemChanged.connect(self._on_label_selected)
         self.label_list.itemDoubleClicked.connect(self._on_label_double_clicked)
-        self.label_list.setFixedHeight(150)
+        # self.label_list.setFixedHeight(150)
+        self.label_list.setFixedHeight(120)
         self.edit.set_list_widget(self.label_list)
+        layout.addWidget(QtWidgets.QLabel("推荐节点类型:"))
         layout.addWidget(self.label_list)
+
         if flags is None:
             flags = {}
         self._flags = flags
         self._flags_layout = QtWidgets.QVBoxLayout()
         self._reset_flags()
         layout.addItem(self._flags_layout)
-        # text edit
+
+        # text edit 原有的description部分 这里可做为备注
         self.edit_description = QtWidgets.QTextEdit()
-        self.edit_description.setPlaceholderText("Label description")
-        self.edit_description.setFixedHeight(50)
+        # self.edit_description.setPlaceholderText("Label description")
+        # self.edit_description.setFixedHeight(50)
+        self.edit_description.setPlaceholderText("额外备注(Description)")
+        self.edit_description.setFixedHeight(40)
         layout.addWidget(self.edit_description)
+
+        # buttons
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        bb.accepted.connect(self._validate)
+        bb.rejected.connect(self.reject)
+        layout.addWidget(bb)
+
         self.setLayout(layout)
+
         # completion
         completer = QtWidgets.QCompleter()
         if completion == "startswith":
@@ -111,6 +252,34 @@ class LabelDialog(QtWidgets.QDialog):
             raise ValueError(f"Unsupported completion: {completion}")
         completer.setModel(self.label_list.model())
         self.edit.setCompleter(completer)
+
+    # 定义两个增删函数来控制我们的逻辑边表格
+    def _add_edge_row(self, target_id="", relation=""):
+        row = self.edges_table.rowCount()
+        self.edges_table.insertRow(row)
+
+        # 目标ID输入框
+        item_target = QtWidgets.QTableWidgetItem(str(target_id) if target_id else "")
+        self.edges_table.setItem(row, 0, item_target)
+
+        # 关系类型下拉框
+        combo = QtWidgets.QComboBox()
+        combo.addItems(
+            [
+                "READS_AFTER",
+                "ANNOTATES",
+                "INSERTS_AT",
+                "REPLACES",
+                "OVERLAPS",
+                "REPRESENTS",
+            ]
+        )
+        if relation:
+            combo.setCurrentText(relation)
+        self.edges_table.setCellWidget(row, 1, combo)
+
+    def _clear_edges_table(self):
+        self.edges_table.setRowCount(0)
 
     def add_label_history(self, label: str) -> None:
         if self.label_list.findItems(label, QtCore.Qt.MatchExactly):
@@ -196,7 +365,24 @@ class LabelDialog(QtWidgets.QDialog):
         group_id: int | None = None,
         description: str | None = None,
         flags_disabled: bool = False,
-    ) -> tuple[str, dict[str, bool], int | None, str] | tuple[None, None, None, None]:
+        # 增加我们需要的参数
+        node_id: str = "",
+        transcription: str = "",
+        attributes: dict[str, Any] | None = None,
+        edges: list[dict[str, str]] | None = None,
+    ) -> (
+        tuple[
+            str,
+            dict[str, bool],
+            int | None,
+            str,
+            str,
+            str,
+            dict[str, Any],
+            list[dict[str, str]],
+        ]
+        | tuple[None, None, None, None, None, None, None, None]
+    ):
         if self._fit_to_content["row"]:
             self.label_list.setMinimumHeight(
                 self.label_list.sizeHintForRow(0) * self.label_list.count() + 2
@@ -209,6 +395,7 @@ class LabelDialog(QtWidgets.QDialog):
         # description is always initialized by empty text c.f., self.edit.text
         if description is None:
             description = ""
+
         self.edit_description.setPlainText(description)
         self._restore_or_reset_flags(text, flags)
         if flags_disabled:
@@ -220,22 +407,83 @@ class LabelDialog(QtWidgets.QDialog):
             self.edit_group_id.clear()
         else:
             self.edit_group_id.setText(str(group_id))
+        # 恢复增加的属性到UI控件(状态回显)
+        self.edit_node_id.setText(str(node_id) if node_id is not None else "")
+        self.edit_transcription.setPlainText(
+            str(transcription) if transcription is not None else ""
+        )
+        if attributes:
+            # 恢复 Z-Index
+            z_idx = attributes.get("z_index", 0)
+            try:  # 转为int类型
+                self.combo_z_index.setCurrentIndex(
+                    int(z_idx) if z_idx is not None else 0
+                )
+            except ValueError:
+                self.combo_z_index.setCurrentIndex(0)
+
+            # 恢复 Color
+            c_val = attributes.get("color", "black")
+            c_idx = self.combo_color.findText(str(c_val))
+            if c_idx >= 0:
+                self.combo_color.setCurrentIndex(c_idx)
+        else:
+            # 如果是新建的框，重置下拉菜单，防止残留上一个框的属性
+            self.combo_z_index.setCurrentIndex(0)
+
+        # 清空并遍历加载所有的边
+        self._clear_edges_table()
+        if edges:
+            for edge in edges:
+                self._add_edge_row(edge.get("target", ""), edge.get("relation", ""))
+        else:
+            self.edit_target_id.clear()
+            self.combo_relation.setCurrentIndex(0)
+
+        # 列表匹配定位
         items = self.label_list.findItems(text, QtCore.Qt.MatchFixedString)
         if items:
             if len(items) != 1:
                 logger.warning(f"Label list has duplicate '{text}'")
             self.label_list.setCurrentItem(items[0])
             row = self.label_list.row(items[0])
-            self.edit.completer().setCurrentRow(row)
+            # self.edit.completer().setCurrentRow(row)
         self.edit.setFocus(QtCore.Qt.PopupFocusReason)
         if move:
             self.move(QtGui.QCursor.pos())
+
+        # 弹窗阻塞等待用户操作
         if self.exec_():
+            # 用户点击 OK，打包返回收集到的所有数据
+
+            # 提取图层和颜色组装 attributes
+            z_idx = self.combo_z_index.currentIndex()
+            c_val = self.combo_color.currentText()
+            out_attributes = {"z_index": z_idx, "color": c_val}
+
+            # 遍历表格 提取逻辑边组装 edges
+            out_edges = []
+            for row in range(self.edges_table.rowCount()):
+                target_item = self.edges_table.item(row, 0)
+                relation_widget = self.edges_table.cellWidget(row, 1)
+
+                target_id = target_item.text().strip() if target_item else ""
+                relation = relation_widget.currentText() if relation_widget else ""
+
+                if target_id and relation:
+                    out_edges.append({"target": target_id, "relation": relation})
+
+            # 返回包括我们额外元素的元组
             return (
-                self.edit.text(),
-                self._current_flags(),
-                self._current_group_id(),
-                self.edit_description.toPlainText(),
-            )
+                self.edit.text(),  # 0: label / type
+                self._current_flags(),  # 1: flags
+                self._current_group_id(),  # 2: group_id
+                self.edit_description.toPlainText(),  # 3: description
+                self.edit_node_id.text().strip(),  # 4: node_id #
+                self.edit_transcription.toPlainText().strip(),  # 5: transcription #
+                out_attributes,  # 6: attributes #
+                out_edges,
+            )  # 7: edges #
         else:
-            return None, None, None, None
+            # 用户点击取消，返回同样长度的全 None 元组
+            return None, None, None, None, None, None, None, None

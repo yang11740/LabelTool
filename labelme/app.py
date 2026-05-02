@@ -53,7 +53,8 @@ from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
 from labelme.widgets import download_ai_model
-from labelme.widgets import format_shape_label
+
+# from labelme.widgets import format_shape_label
 
 from . import utils
 
@@ -109,6 +110,7 @@ class _Actions(NamedTuple):
     about: QtWidgets.QAction
     save: QtWidgets.QAction
     save_as: QtWidgets.QAction
+    export_visual: QtWidgets.QAction  # 新增具名元组
     save_auto: QtWidgets.QAction
     save_with_image_data: QtWidgets.QAction
     change_output_dir: QtWidgets.QAction
@@ -320,6 +322,15 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Save labels to a different file"),
             enabled=False,
         )
+        # 添加我们的保存标记图片的按钮
+        export_visual = action(
+            text=self.tr("导出可视化图片(&E)"),  # 快捷键 Alt+E 触发
+            slot=self.export_annotated_image,
+            shortcut="Ctrl+E",
+            icon="phosphor/image-square.svg",  # 借用一个自带的图标
+            tip=self.tr("将标注内容、连线与原图合并导出"),
+            enabled=False,
+        )
         save_auto = action(
             text=self.tr("Save &Automatically"),
             tip=self.tr("Save automatically"),
@@ -378,6 +389,9 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr('Toggle "keep previous annotation" mode'),
             checkable=True,
         )
+        # 强制关闭，避免切图不更新的错觉
+        self._config["keep_prev"] = False
+        toggle_keep_prev_mode.setChecked(False)
         toggle_keep_prev_mode.setChecked(self._config["keep_prev"])
         toggle_keep_prev_brightness_contrast = action(
             text=self.tr("Keep Previous Brightness/Contrast"),
@@ -710,7 +724,8 @@ class MainWindow(QtWidgets.QMainWindow):
             create_ai_box_to_shape_mode,
             brightness_contrast,
         )
-        on_shapes_present = (save_as, hide_all, show_all, toggle_all)
+        # 加入我们的export_visual
+        on_shapes_present = (save_as, hide_all, show_all, toggle_all, export_visual)
         context_menu = (
             *[draw_action for _, draw_action in draw],
             edit_mode,
@@ -742,6 +757,7 @@ class MainWindow(QtWidgets.QMainWindow):
             about=about,
             save=save,
             save_as=save_as,
+            export_visual=export_visual,  # 加入新按钮
             save_auto=save_auto,
             save_with_image_data=save_with_image_data,
             change_output_dir=change_output_dir,
@@ -838,6 +854,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._actions.open_dir,
                 self._actions.save,
                 self._actions.save_as,
+                self._actions.export_visual,  # 添加菜单
                 self._actions.save_auto,
                 self._actions.change_output_dir,
                 self._actions.save_with_image_data,
@@ -915,6 +932,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._actions.open_prev_img,
                     self._actions.open_next_img,
                     self._actions.save,
+                    self._actions.export_visual,  # 快捷保存按钮
                     self._actions.delete_file,
                     None,
                     self._actions.edit_mode,
@@ -1086,6 +1104,7 @@ class MainWindow(QtWidgets.QMainWindow):
         label = QtWidgets.QDockWidget(self.tr("Label List"), self)
         label.setObjectName("Label List")
         label.setWidget(unique_label_list)
+        label.setVisible(False)  # 彻底隐藏它
 
         file_search = QtWidgets.QLineEdit()
         file_search.setPlaceholderText(self.tr("Search Filename"))
@@ -1392,7 +1411,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def show_label_list_menu(self, point: QtCore.QPoint) -> None:
         # PyQt5 stubs type QMenu.exec() argument too narrowly
-        self._menus.label_list.exec(self._docks.label_list.mapToGlobal(point))  # ty: ignore[invalid-argument-type]
+        self._menus.label_list.exec(
+            self._docks.label_list.mapToGlobal(point)
+        )  # ty: ignore[invalid-argument-type]
 
     def validate_label(self, label: str) -> bool:
         policy = self._config["validate_label"]
@@ -1401,102 +1422,147 @@ class MainWindow(QtWidgets.QMainWindow):
         unique_label_list = self._docks.unique_label_list
         existing_labels = [
             # PyQt5 stubs: item() typed as Optional and .data() unrecognized
-            unique_label_list.item(i).data(Qt.UserRole)  # ty: ignore[unresolved-attribute]
+            unique_label_list.item(i).data(
+                Qt.UserRole
+            )  # ty: ignore[unresolved-attribute]
             for i in range(unique_label_list.count())
         ]
         return _is_valid_label(
             label=label, existing_labels=existing_labels, policy=policy
         )
 
+    # 1. 修改对接8个参数
     def _edit_label(self, value: object | None = None) -> None:
-        items = self._docks.label_list.selected_items()
-        if not items:
-            logger.warning("No label is selected, so cannot edit label.")
-            return
+        try:
+            items = self._docks.label_list.selected_items()
+            if not items:
+                logger.warning("No label is selected, so cannot edit label.")
+                return
 
-        shapes = [cast(Shape, item.shape()) for item in items]
-        first_shape = shapes[0]
+            shapes = [cast(Shape, item.shape()) for item in items]
+            first_shape = shapes[0]
 
-        if len(items) == 1:
-            edit_text = True
-            edit_flags = True
-            edit_group_id = True
-            edit_description = True
-        else:
-            edit_text = all(shape.label == first_shape.label for shape in shapes[1:])
-            edit_flags = all(shape.flags == first_shape.flags for shape in shapes[1:])
-            edit_group_id = all(
-                shape.group_id == first_shape.group_id for shape in shapes[1:]
+            if len(items) == 1:
+                edit_text = True
+                edit_flags = True
+                edit_group_id = True
+                edit_description = True
+            else:
+                edit_text = all(
+                    shape.label == first_shape.label for shape in shapes[1:]
+                )
+                edit_flags = all(
+                    shape.flags == first_shape.flags for shape in shapes[1:]
+                )
+                edit_group_id = all(
+                    shape.group_id == first_shape.group_id for shape in shapes[1:]
+                )
+                edit_description = all(
+                    shape.description == first_shape.description for shape in shapes[1:]
+                )
+
+            if not edit_text:
+                self._label_dialog.edit.setDisabled(True)
+                self._label_dialog.label_list.setDisabled(True)
+            if not edit_group_id:
+                self._label_dialog.edit_group_id.setDisabled(True)
+            if not edit_description:
+                self._label_dialog.edit_description.setDisabled(True)
+
+            # 调用我们改写后的 popup，传入和接住 8 个值
+            popup_res = self._label_dialog.popup(
+                text=first_shape.label if edit_text else "",
+                flags=first_shape.flags if edit_flags else None,
+                group_id=first_shape.group_id if edit_group_id else None,
+                description=first_shape.description if edit_description else None,
+                flags_disabled=not edit_flags,
+                node_id=first_shape.node_id if len(items) == 1 else "",
+                transcription=first_shape.transcription if len(items) == 1 else "",
+                attributes=first_shape.attributes if len(items) == 1 else None,
+                edges=first_shape.edges if len(items) == 1 else None,
             )
-            edit_description = all(
-                shape.description == first_shape.description for shape in shapes[1:]
-            )
+            (
+                text,
+                flags,
+                group_id,
+                description,
+                node_id,
+                transcription,
+                attributes,
+                edges,
+            ) = popup_res
+            # text, flags, group_id, description = self._label_dialog.popup(
+            #     text=first_shape.label if edit_text else "",
+            #     flags=first_shape.flags if edit_flags else None,
+            #     group_id=first_shape.group_id if edit_group_id else None,
+            #     description=first_shape.description if edit_description else None,
+            #     flags_disabled=not edit_flags,
+            # )
 
-        if not edit_text:
-            self._label_dialog.edit.setDisabled(True)
-            self._label_dialog.label_list.setDisabled(True)
-        if not edit_group_id:
-            self._label_dialog.edit_group_id.setDisabled(True)
-        if not edit_description:
-            self._label_dialog.edit_description.setDisabled(True)
+            if not edit_text:
+                self._label_dialog.edit.setDisabled(False)
+                self._label_dialog.label_list.setDisabled(False)
+            if not edit_group_id:
+                self._label_dialog.edit_group_id.setDisabled(False)
+            if not edit_description:
+                self._label_dialog.edit_description.setDisabled(False)
 
-        text, flags, group_id, description = self._label_dialog.popup(
-            text=first_shape.label if edit_text else "",
-            flags=first_shape.flags if edit_flags else None,
-            group_id=first_shape.group_id if edit_group_id else None,
-            description=first_shape.description if edit_description else None,
-            flags_disabled=not edit_flags,
-        )
+            if text is None:
+                assert flags is None
+                assert group_id is None
+                assert description is None
+                return
 
-        if not edit_text:
-            self._label_dialog.edit.setDisabled(False)
-            self._label_dialog.label_list.setDisabled(False)
-        if not edit_group_id:
-            self._label_dialog.edit_group_id.setDisabled(False)
-        if not edit_description:
-            self._label_dialog.edit_description.setDisabled(False)
-
-        if text is None:
-            assert flags is None
-            assert group_id is None
-            assert description is None
-            return
-
-        if not self.validate_label(text):
-            self.show_error_message(
-                self.tr("Invalid label"),
-                self.tr("Invalid label '{}' with validation type '{}'").format(
-                    text, self._config["validate_label"]
-                ),
-            )
-            return
-
-        self._canvas_widgets.canvas.backup_shapes()
-        for item in items:
-            shape = item.shape()
-            assert shape is not None
-
-            if edit_text:
-                shape.label = text
-            if edit_flags:
-                shape.flags = flags
-            if edit_group_id:
-                shape.group_id = group_id
-            if edit_description:
-                shape.description = description
-
-            self._update_shape_color(shape)
-            assert shape.label is not None
-            item.setText(format_shape_label(shape))
-            self.mark_dirty()
-            if self._docks.unique_label_list.find_label_item(shape.label) is None:
-                self._docks.unique_label_list.add_label_item(
-                    label=shape.label,
-                    color=self._get_rgb_by_label(
-                        label=shape.label,
-                        unique_label_list=self._docks.unique_label_list,
+            if not self.validate_label(text):
+                self.show_error_message(
+                    self.tr("Invalid label"),
+                    self.tr("Invalid label '{}' with validation type '{}'").format(
+                        text, self._config["validate_label"]
                     ),
                 )
+                return
+
+            self._canvas_widgets.canvas.backup_shapes()
+            for item in items:
+                shape = item.shape()
+                assert shape is not None
+
+                if edit_text:
+                    shape.label = text
+                    shape.type = text  # 同步类型
+                if edit_flags:
+                    shape.flags = flags
+                if edit_group_id:
+                    shape.group_id = group_id
+                if edit_description:
+                    shape.description = description
+
+                # 给编辑的 Shape 赋新值
+                if node_id is not None:
+                    shape.node_id = node_id
+                if transcription is not None:
+                    shape.transcription = transcription
+                if attributes is not None:
+                    shape.attributes = attributes
+                if edges is not None:
+                    shape.edges = edges
+
+                self._update_shape_color(shape)
+                assert shape.label is not None
+                item.setText(format_shape_label(shape))
+                self.mark_dirty()
+                if self._docks.unique_label_list.find_label_item(shape.label) is None:
+                    self._docks.unique_label_list.add_label_item(
+                        label=shape.label,
+                        color=self._get_rgb_by_label(
+                            label=shape.label,
+                            unique_label_list=self._docks.unique_label_list,
+                        ),
+                    )
+        except Exception as e:
+            # === 捕获崩溃 ===
+            logger.error("🔥 致命错误：app._edit_label 发生崩溃！")
+            logger.error(traceback.format_exc())
 
     def _on_file_search_changed(self) -> None:
         self._import_images_from_dir(
@@ -1731,6 +1797,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # Callback functions:
 
+    # 2. 修改：对接我们的8个参数
     def _on_new_shape(self) -> None:
         """Pop-up and give focus to the label editor.
 
@@ -1745,7 +1812,18 @@ class MainWindow(QtWidgets.QMainWindow):
         description = ""
         if self._config["display_label_popup"] or not text:
             previous_text = self._label_dialog.edit.text()
-            text, flags, group_id, description = self._label_dialog.popup(text)
+            # 使用新 popup 接收 8 个返回值
+            popup_res = self._label_dialog.popup(text)
+            (
+                text,
+                flags,
+                group_id,
+                description,
+                node_id,
+                transcription,
+                attributes,
+                edges,
+            ) = popup_res
             if not text:
                 self._label_dialog.edit.setText(previous_text)
 
@@ -1764,7 +1842,16 @@ class MainWindow(QtWidgets.QMainWindow):
             for shape in shapes:
                 shape.group_id = group_id
                 shape.description = description
+
+                # 为新建的 Shape 绑定收集到的新数据
+                shape.type = text
+                shape.node_id = node_id
+                shape.transcription = transcription
+                shape.attributes = attributes
+                shape.edges = edges
+
                 self.add_label(shape)
+
             self._actions.edit_mode.setEnabled(True)
             self._actions.undo_last_point.setEnabled(False)
             self._actions.undo.setEnabled(True)
@@ -2322,7 +2409,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if system == "Darwin":
             subprocess.Popen(["open", "-t", config_file])
         elif system == "Windows":
-            os.startfile(config_file)  # ty: ignore[unresolved-attribute]  # Windows-only
+            os.startfile(
+                config_file
+            )  # ty: ignore[unresolved-attribute]  # Windows-only
         else:
             subprocess.Popen(["xdg-open", config_file])
 
@@ -2536,7 +2625,137 @@ class MainWindow(QtWidgets.QMainWindow):
         stats.append(f"x={mouse_pos.x():6.1f}, y={mouse_pos.y():6.1f}")
         self._status_bar.stats.setText(" | ".join(stats))
 
+    # 加入一个导出标注后的照片的方法
+    def export_annotated_image(self, _value: bool = False) -> None:
+        if self._image.isNull() or not self._canvas_widgets.canvas.shapes:
+            self.show_error_message(
+                self.tr("Error"), self.tr("没有加载图片或没有标注数据！")
+            )
+            return
 
+        # 1. 弹出保存路径对话框
+        from pathlib import Path
+
+        default_name = (
+            "visual_" + Path(self._image_path).name
+            if self._image_path
+            else "visual_image.png"
+        )
+        save_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            self.tr("Export Annotated Image"),
+            str(Path(self.current_path()) / default_name),
+            self.tr("Images (*.png *.jpg *.jpeg)"),
+        )
+        if not save_path:
+            return
+
+        # 2. 拷贝当前原图底底板
+        image = self._image.copy()
+
+        # 3. 准备 QPainter 画图
+        from PyQt5 import QtGui, QtCore
+
+        painter = QtGui.QPainter(image)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)  # 抗锯齿
+
+        # 动态自适应字体大小 (按图片高度比例算)
+        font = painter.font()
+        font.setPointSize(max(15, image.height() // 50))
+        font.setBold(True)
+        painter.setFont(font)
+
+        shapes = self._canvas_widgets.canvas.shapes
+        node_centers = {}
+
+        # 第一次遍历：画多边形/框、文本，并记录中心点位置
+        for shape in shapes:
+            points = shape.points
+            if not points:
+                continue
+
+            # 提取我们新增的属性
+            node_id = getattr(shape, "node_id", "")
+            transcription = getattr(shape, "transcription", "")
+
+            # 画多边形/框
+            pen = QtGui.QPen(shape.line_color)
+            pen.setWidth(max(2, image.width() // 500))
+            painter.setPen(pen)
+
+            path = shape.to_path()
+            painter.drawPath(path)
+
+            # 画半透明填充
+            painter.fillPath(path, shape.fill_color)
+
+            # 计算中心点(用于画连线)
+            cx = sum(p.x() for p in points) / len(points)
+            cy = sum(p.y() for p in points) / len(points)
+            center_pt = QtCore.QPointF(cx, cy)
+
+            if node_id:
+                node_centers[node_id] = center_pt
+
+            # 绘制文本 (Node ID + 转写内容截断)
+            text_x, text_y = points[0].x(), points[0].y() - 10
+            text_content = (
+                f"[{node_id}] {transcription[:15]}..."
+                if transcription
+                else f"[{node_id}] {shape.label}"
+            )
+
+            # 加个纯色背景让字更清晰
+            fm = painter.fontMetrics()
+            text_rect = fm.boundingRect(text_content)
+            bg_rect = QtCore.QRectF(
+                text_x,
+                text_y - text_rect.height(),
+                text_rect.width(),
+                text_rect.height(),
+            )
+            painter.fillRect(bg_rect, QtGui.QColor(255, 255, 255, 180))  # 白色半透明底
+
+            painter.setPen(QtGui.QPen(QtCore.Qt.black))
+            painter.drawText(QtCore.QPointF(text_x, text_y), text_content)
+
+        # 第二次遍历：连线 添加逻辑边
+        pen_edge = QtGui.QPen(QtCore.Qt.blue)
+        pen_edge.setWidth(max(2, image.width() // 400))
+        pen_edge.setStyle(QtCore.Qt.DashLine)  # 使用虚线画连线
+        painter.setPen(pen_edge)
+
+        for shape in shapes:
+            source_id = getattr(shape, "node_id", "")
+            if not source_id or source_id not in node_centers:
+                continue
+
+            for edge in getattr(shape, "edges", []):
+                target_id = edge.get("target")
+                if target_id in node_centers:
+                    start_pt = node_centers[source_id]
+                    end_pt = node_centers[target_id]
+
+                    # 画两点之间的连线
+                    painter.drawLine(start_pt, end_pt)
+
+                    # 在连线中点画出关系类型(Relation)
+                    mid_x = (start_pt.x() + end_pt.x()) / 2
+                    mid_y = (start_pt.y() + end_pt.y()) / 2
+                    relation_text = edge.get("relation", "")
+
+                    painter.setPen(QtGui.QPen(QtCore.Qt.red))
+                    painter.drawText(QtCore.QPointF(mid_x, mid_y), relation_text)
+                    painter.setPen(pen_edge)  # 恢复虚线画笔给下一条线用
+
+        painter.end()
+
+        # 4. 保存为图片
+        image.save(save_path)
+        self.show_status_message(self.tr("导出可视化图片成功: %s") % save_path)
+
+
+# 3. 在读文件的时候实例化我们增加的属性
 def _shapes_from_dicts(
     *,
     shape_dicts: list[ShapeDict],
@@ -2550,6 +2769,12 @@ def _shapes_from_dicts(
             group_id=shape_dict["group_id"],
             description=shape_dict["description"],
             mask=shape_dict["mask"],
+            # 新增字段传递给 Shape 内存对象
+            node_id=shape_dict.get("node_id", ""),
+            type=shape_dict.get("type", shape_dict["label"]),
+            transcription=shape_dict.get("transcription", ""),
+            attributes=shape_dict.get("attributes", {"z_index": 0, "color": "black"}),
+            edges=shape_dict.get("edges", []),
         )
         for x, y in shape_dict["points"]:
             shape.add_point(QtCore.QPointF(x, y))
@@ -2654,6 +2879,7 @@ def _make_image_list_item(
     return item
 
 
+# 4. 在保存文件时将增加的属性打包进字典
 def _shape_to_dict(shape: Shape) -> dict[str, Any]:
     data = shape.other_data.copy()
     data.update(
@@ -2663,9 +2889,17 @@ def _shape_to_dict(shape: Shape) -> dict[str, Any]:
         description=shape.description,
         shape_type=shape.shape_type,
         flags=shape.flags,
-        mask=None
-        if shape.mask is None
-        else utils.img_arr_to_b64(shape.mask.astype(np.uint8)),
+        mask=(
+            None
+            if shape.mask is None
+            else utils.img_arr_to_b64(shape.mask.astype(np.uint8))
+        ),
+        # 将 Shape 对象的新增属性写入 JSON 字典
+        node_id=shape.node_id,
+        type=shape.type,
+        transcription=shape.transcription,
+        attributes=shape.attributes,
+        edges=shape.edges,
     )
     return data
 
@@ -2692,3 +2926,24 @@ def _scan_image_files(root_dir: str) -> list[str]:
             "falling back to locale-unaware natural sort"
         )
         return natsort.natsorted(images)
+
+
+# 添加我们自己的标签列表展示
+def format_shape_label(shape: Shape) -> str:
+    node_id = getattr(shape, "node_id", "")
+    label_type = shape.label or ""
+    group_id = shape.group_id if shape.group_id is not None else ""
+    transcription = getattr(shape, "transcription", "")
+
+    parts = []
+    if node_id:
+        parts.append(str(node_id))
+    if label_type:
+        parts.append(str(label_type))
+    if group_id != "":
+        parts.append(str(group_id))
+    if transcription:
+        t_str = str(transcription).replace("\n", " ")
+        parts.append(t_str[:15] + ("..." if len(t_str) > 15 else ""))
+
+    return " | ".join(parts) if parts else "Unnamed"
