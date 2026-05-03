@@ -36,11 +36,15 @@ pip install git+[https://github.com/shemufan/Mylabelme_-labelme-.git](https://gi
 
 - **节点 ID (Node ID):** 为当前标注对象分配唯一标识（如 `n_main_1`）。
 
+- **节点类型Type(Type):** 选定当前文本的类型。
+
 - **文本转写 (Transcription):** 记录该区域内的文字内容。
 
 - **图层 (Z-Index) & 颜色 (Color):** 快速配置视觉层级和显示颜色。
 
 - **逻辑边配置 (Edges):** 点击 ➕ 按钮，即可快速建立当前节点与目标节点的关联关系（如 `ANNOTATES`, `REPLACES` 等）。
+
+![alt text](image.png)
 
 _注意：所有这些扩展字段都将无损保存到最终生成的 JSON 文件中，完美契合我们的算法训练数据格式要求。_
 
@@ -55,6 +59,8 @@ _注意：所有这些扩展字段都将无损保存到最终生成的 JSON 文�
 2. 点击顶部菜单栏的 **File (文件) -> 导出可视化图片(&E)**，或直接使用快捷键 `Ctrl+E`。
 
 3. 选择保存路径，软件将自动把多边形框、截断版转写文本、以及节点间的**虚线逻辑连线**绘制在原图上，并导出一张高清晰度的成品图片。
+
+![alt text](visual_p3.png)
 
 ---
 
