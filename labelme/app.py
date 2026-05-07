@@ -22,7 +22,7 @@ from typing import get_args
 import imgviz
 import natsort
 import numpy as np
-import osam
+# import osam
 from loguru import logger
 from numpy.typing import NDArray
 from PyQt5 import QtCore
@@ -33,17 +33,17 @@ from PyQt5.QtWidgets import QMessageBox
 
 from labelme import __appname__
 from labelme import __version__
-from labelme._automation import bbox_from_text
-from labelme._automation._osam_session import OsamSession
+# from labelme._automation import bbox_from_text
+# from labelme._automation._osam_session import OsamSession
 from labelme._label_file import LabelFile
 from labelme._label_file import LabelFileError
 from labelme._label_file import ShapeDict
 from labelme._shape_clipboard import ShapeClipboard
 from labelme.config import load_config
 from labelme.shape import Shape
-from labelme.widgets import AiAssistedAnnotationWidget
-from labelme.widgets import AiTextToAnnotationWidget
-from labelme.widgets import BrightnessContrastDialog
+# from labelme.widgets import AiAssistedAnnotationWidget
+# from labelme.widgets import AiTextToAnnotationWidget
+# from labelme.widgets import BrightnessContrastDialog
 from labelme.widgets import Canvas
 from labelme.widgets import LabelDialog
 from labelme.widgets import LabelListWidget
@@ -52,7 +52,7 @@ from labelme.widgets import StatusStats
 from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
-from labelme.widgets import download_ai_model
+# from labelme.widgets import download_ai_model
 
 # from labelme.widgets import format_shape_label
 
@@ -256,18 +256,18 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._menus = self._setup_menus()
 
-        self._ai_annotation = AiAssistedAnnotationWidget(
-            default_model=self._config["ai"]["default"],
-            on_model_changed=self._canvas_widgets.canvas.set_ai_model_name,
-            on_output_format_changed=self._canvas_widgets.canvas.set_ai_output_format,
-            parent=self,
-        )
-        self._ai_annotation.setEnabled(False)
+        # self._ai_annotation = AiAssistedAnnotationWidget(
+        #     default_model=self._config["ai"]["default"],
+        #     on_model_changed=self._canvas_widgets.canvas.set_ai_model_name,
+        #     on_output_format_changed=self._canvas_widgets.canvas.set_ai_output_format,
+        #     parent=self,
+        # )
+        # self._ai_annotation.setEnabled(False)
 
-        self._ai_text = AiTextToAnnotationWidget(
-            on_submit=self._submit_ai_prompt, parent=self
-        )
-        self._ai_text.setEnabled(False)
+        # self._ai_text = AiTextToAnnotationWidget(
+        #     on_submit=self._submit_ai_prompt, parent=self
+        # )
+        # self._ai_text.setEnabled(False)
 
         self._setup_toolbars()
 
@@ -701,8 +701,8 @@ class MainWindow(QtWidgets.QMainWindow):
             ("point", create_point_mode),
             ("line", create_line_mode),
             ("linestrip", create_line_strip_mode),
-            ("ai_points_to_shape", create_ai_points_to_shape_mode),
-            ("ai_box_to_shape", create_ai_box_to_shape_mode),
+            # ("ai_points_to_shape", create_ai_points_to_shape_mode),
+            # ("ai_box_to_shape", create_ai_box_to_shape_mode),
         ]
         zoom = (
             self._canvas_widgets.zoom_widget,
@@ -720,8 +720,8 @@ class MainWindow(QtWidgets.QMainWindow):
             create_line_mode,
             create_point_mode,
             create_line_strip_mode,
-            create_ai_points_to_shape_mode,
-            create_ai_box_to_shape_mode,
+            # create_ai_points_to_shape_mode,
+            # create_ai_box_to_shape_mode,
             brightness_contrast,
         )
         # 加入我们的export_visual
@@ -916,37 +916,25 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def _setup_toolbars(self) -> None:
-        select_ai_model = QtWidgets.QWidgetAction(self)
-        select_ai_model.setDefaultWidget(self._ai_annotation)
+        # select_ai_model = QtWidgets.QWidgetAction(self)
+        # select_ai_model.setDefaultWidget(self._ai_annotation)
 
-        ai_prompt_action = QtWidgets.QWidgetAction(self)
-        ai_prompt_action.setDefaultWidget(self._ai_text)
+        # ai_prompt_action = QtWidgets.QWidgetAction(self)
+        # ai_prompt_action.setDefaultWidget(self._ai_text)
 
         self.addToolBar(
             Qt.TopToolBarArea,
             ToolBar(
                 title="Tools",
                 actions=[
-                    self._actions.open,
-                    self._actions.open_dir,
-                    self._actions.open_prev_img,
-                    self._actions.open_next_img,
-                    self._actions.save,
-                    self._actions.export_visual,  # 快捷保存按钮
-                    self._actions.delete_file,
-                    None,
-                    self._actions.edit_mode,
-                    self._actions.duplicate,
-                    self._actions.delete,
-                    self._actions.undo,
-                    self._actions.brightness_contrast,
-                    None,
-                    self._actions.fit_window,
-                    self._actions.zoom_widget_action,
-                    None,
-                    select_ai_model,
-                    None,
-                    ai_prompt_action,
+                    self._actions.open, self._actions.open_dir,
+                    self._actions.open_prev_img, self._actions.open_next_img,
+                    self._actions.save, self._actions.export_visual,
+                    self._actions.delete_file, None,
+                    self._actions.edit_mode, self._actions.duplicate,
+                    self._actions.delete, self._actions.undo,
+                    self._actions.brightness_contrast, None,
+                    self._actions.fit_window, self._actions.zoom_widget_action,
                 ],
                 font_base=self.font(),
             ),
@@ -956,22 +944,16 @@ class MainWindow(QtWidgets.QMainWindow):
             ToolBar(
                 title="CreateShapeTools",
                 actions=[
-                    *[
-                        a
-                        for mode, a in self._actions.draw
-                        if not mode.startswith("ai_")
+                   a for mode, a in self._actions.draw if not mode.startswith("ai_")
                     ],
-                    None,
-                    *[a for mode, a in self._actions.draw if mode.startswith("ai_")],
-                ],
                 orientation=Qt.Vertical,
                 button_style=Qt.ToolButtonTextUnderIcon,
                 font_base=self.font(),
             ),
         )
-        self._ai_annotation.hover_highlight_requested.connect(
-            self._highlight_ai_buttons
-        )
+        # self._ai_annotation.hover_highlight_requested.connect(
+        #     self._highlight_ai_buttons
+        # )
 
     def _setup_app_state(
         self,
@@ -1260,74 +1242,75 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(message, delay)
 
     def _submit_ai_prompt(self, _: bool) -> None:
-        create_mode = self._canvas_widgets.canvas.create_mode
-        shape_type = _resolve_text_annotation_shape_type(
-            create_mode=create_mode,
-            ai_output_format=self._ai_annotation.output_format,
-        )
-        if shape_type is None:
-            logger.warning("Unsupported create_mode={!r}", create_mode)
-            return
+        # create_mode = self._canvas_widgets.canvas.create_mode
+        # shape_type = _resolve_text_annotation_shape_type(
+        #     create_mode=create_mode,
+        #     ai_output_format=self._ai_annotation.output_format,
+        # )
+        # if shape_type is None:
+        #     logger.warning("Unsupported create_mode={!r}", create_mode)
+        #     return
 
-        texts = self._ai_text.get_text_prompt().split(",")
+        # texts = self._ai_text.get_text_prompt().split(",")
 
-        model_name: str = self._ai_text.get_model_name()
-        model_type = osam.apis.get_model_type_by_name(model_name)
-        if not (_is_already_downloaded := model_type.get_size() is not None):
-            if not download_ai_model(model_name=model_name, parent=self):
-                return
-        if (
-            self._text_osam_session is None
-            or self._text_osam_session.model_name != model_name
-        ):
-            self._text_osam_session = OsamSession(model_name=model_name)
+        # model_name: str = self._ai_text.get_model_name()
+        # model_type = osam.apis.get_model_type_by_name(model_name)
+        # if not (_is_already_downloaded := model_type.get_size() is not None):
+        #     if not download_ai_model(model_name=model_name, parent=self):
+        #         return
+        # if (
+        #     self._text_osam_session is None
+        #     or self._text_osam_session.model_name != model_name
+        # ):
+        #     self._text_osam_session = OsamSession(model_name=model_name)
 
-        boxes, scores, labels, masks = bbox_from_text.get_bboxes_from_texts(
-            session=self._text_osam_session,
-            image=utils.img_qt_to_arr(self._image)[:, :, :3],
-            image_id=str(hash(self._image_path)),
-            texts=texts,
-        )
+        # boxes, scores, labels, masks = bbox_from_text.get_bboxes_from_texts(
+        #     session=self._text_osam_session,
+        #     image=utils.img_qt_to_arr(self._image)[:, :, :3],
+        #     image_id=str(hash(self._image_path)),
+        #     texts=texts,
+        # )
 
-        SCORE_FOR_EXISTING_SHAPE: Final[float] = 1.01
-        for shape in self._canvas_widgets.canvas.shapes:
-            if shape.shape_type != shape_type or shape.label not in texts:
-                continue
-            boxes = np.r_[boxes, [_shape_to_xyxy_bbox(shape)]]
-            scores = np.r_[scores, [SCORE_FOR_EXISTING_SHAPE]]
-            labels = np.r_[labels, [texts.index(shape.label)]]
+        # SCORE_FOR_EXISTING_SHAPE: Final[float] = 1.01
+        # for shape in self._canvas_widgets.canvas.shapes:
+        #     if shape.shape_type != shape_type or shape.label not in texts:
+        #         continue
+        #     boxes = np.r_[boxes, [_shape_to_xyxy_bbox(shape)]]
+        #     scores = np.r_[scores, [SCORE_FOR_EXISTING_SHAPE]]
+        #     labels = np.r_[labels, [texts.index(shape.label)]]
 
-        boxes, scores, labels, indices = bbox_from_text.nms_bboxes(
-            boxes=boxes,
-            scores=scores,
-            labels=labels,
-            iou_threshold=self._ai_text.get_iou_threshold(),
-            score_threshold=self._ai_text.get_score_threshold(),
-            max_num_detections=100,
-        )
+        # boxes, scores, labels, indices = bbox_from_text.nms_bboxes(
+        #     boxes=boxes,
+        #     scores=scores,
+        #     labels=labels,
+        #     iou_threshold=self._ai_text.get_iou_threshold(),
+        #     score_threshold=self._ai_text.get_score_threshold(),
+        #     max_num_detections=100,
+        # )
 
-        is_new = scores != SCORE_FOR_EXISTING_SHAPE
-        boxes = boxes[is_new]
-        scores = scores[is_new]
-        labels = labels[is_new]
-        indices = indices[is_new]
+        # is_new = scores != SCORE_FOR_EXISTING_SHAPE
+        # boxes = boxes[is_new]
+        # scores = scores[is_new]
+        # labels = labels[is_new]
+        # indices = indices[is_new]
 
-        if masks is not None:
-            masks = [masks[i] for i in indices]
-        del indices
+        # if masks is not None:
+        #     masks = [masks[i] for i in indices]
+        # del indices
 
-        shapes: list[Shape] = bbox_from_text.get_shapes_from_bboxes(
-            boxes=boxes,
-            scores=scores,
-            labels=labels,
-            texts=texts,
-            masks=masks,
-            shape_type=shape_type,
-        )
+        # shapes: list[Shape] = bbox_from_text.get_shapes_from_bboxes(
+        #     boxes=boxes,
+        #     scores=scores,
+        #     labels=labels,
+        #     texts=texts,
+        #     masks=masks,
+        #     shape_type=shape_type,
+        # )
 
-        self._canvas_widgets.canvas.backup_shapes()
-        self._load_shapes(shapes, replace=False)
-        self.mark_dirty()
+        # self._canvas_widgets.canvas.backup_shapes()
+        # self._load_shapes(shapes, replace=False)
+        # self.mark_dirty()
+        pass
 
     def reset_state(self) -> None:
         self._docks.label_list.clear()
@@ -1359,19 +1342,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _switch_canvas_mode(
         self, edit: bool = True, create_mode: str | None = None
     ) -> None:
-        if create_mode == "ai_points_to_shape":
-            model_name = self._canvas_widgets.canvas.get_ai_model_name()
-            if model_name in _AI_MODELS_WITHOUT_POINT_SUPPORT:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    self.tr("AI-Points Unavailable"),
-                    self.tr(
-                        "%s does not support point prompts.\n"
-                        "Please select a different model or use AI-Box mode."
-                    )
-                    % model_name,
-                )
-                return
+        # if create_mode == "ai_points_to_shape":
+        #     model_name = self._canvas_widgets.canvas.get_ai_model_name()
+        #     if model_name in _AI_MODELS_WITHOUT_POINT_SUPPORT:
+        #         QtWidgets.QMessageBox.warning(
+        #             self,
+        #             self.tr("AI-Points Unavailable"),
+        #             self.tr(
+        #                 "%s does not support point prompts.\n"
+        #                 "Please select a different model or use AI-Box mode."
+        #             )
+        #             % model_name,
+        #         )
+        #         return
         self._canvas_widgets.canvas.set_editing(edit)
         if create_mode is not None:
             self._canvas_widgets.canvas.create_mode = create_mode
@@ -1382,16 +1365,6 @@ class MainWindow(QtWidgets.QMainWindow):
             for draw_mode, draw_action in self._actions.draw:
                 draw_action.setEnabled(create_mode != draw_mode)
         self._actions.edit_mode.setEnabled(not edit)
-        self._ai_text.setEnabled(
-            not edit
-            and create_mode
-            in (*get_args(_TextToAnnotationCreateMode), *_AI_CREATE_MODES)
-        )
-        self._ai_annotation.setEnabled(not edit and create_mode in _AI_CREATE_MODES)
-        if create_mode == "ai_points_to_shape":
-            self._ai_annotation.set_disabled_models(_AI_MODELS_WITHOUT_POINT_SUPPORT)
-        else:
-            self._ai_annotation.set_disabled_models(())
 
     def _highlight_ai_buttons(self, highlight: bool) -> None:
         HIGHLIGHT_COLOR: Final = "#FFFFCC"

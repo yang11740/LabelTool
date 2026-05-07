@@ -9,7 +9,7 @@ from typing import Literal
 
 import imgviz
 import numpy as np
-import osam
+# import osam
 from loguru import logger
 from PyQt5 import QtCore
 from PyQt5 import QtGui
@@ -19,7 +19,7 @@ from PyQt5.QtCore import QPointF
 from PyQt5.QtCore import Qt
 
 import labelme.utils
-from labelme._automation import OsamSession
+# from labelme._automation import OsamSession
 from labelme._automation import polygon_from_mask
 from labelme.shape import Shape
 

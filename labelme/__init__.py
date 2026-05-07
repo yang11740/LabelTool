@@ -11,7 +11,7 @@ __version__ = importlib.metadata.version("labelme")
 
 # XXX: has to be imported before PyQt5 to load dlls in order on Windows
 # https://github.com/wkentaro/labelme/issues/1564
-import onnxruntime
+# import onnxruntime
 
 from labelme import utils
 from labelme._label_file import LabelFile

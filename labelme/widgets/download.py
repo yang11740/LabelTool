@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Final
 
-import osam
-import osam.types
+# import osam
+# import osam.types
 from loguru import logger
 from PyQt5.QtCore import Qt
 from PyQt5.QtCore import QThread
