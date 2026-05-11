@@ -10,7 +10,6 @@ from pytestqt.qtbot import QtBot
 from labelme.shape import Shape
 from labelme.widgets.canvas import Canvas
 from labelme.widgets.canvas import _compute_intersection_edges_image
-from labelme.widgets.canvas import _normalize_bbox_points
 
 _WIDTH: Final = 100
 _HEIGHT: Final = 50
@@ -101,27 +100,6 @@ def test_intersectionPoint(
         _compute_intersection_edges_image(p1, p2, image_size=canvas.pixmap.size())
         == pt_intersection
     )
-
-
-@pytest.mark.parametrize(
-    ("p1", "p2"),
-    [
-        (QPointF(10, 20), QPointF(30, 40)),  # top-left -> bottom-right
-        (QPointF(30, 40), QPointF(10, 20)),  # bottom-right -> top-left
-        (QPointF(30, 20), QPointF(10, 40)),  # top-right -> bottom-left
-        (QPointF(10, 40), QPointF(30, 20)),  # bottom-left -> top-right
-    ],
-)
-def test_normalize_bbox_points(p1: QPointF, p2: QPointF) -> None:
-    assert _normalize_bbox_points(bbox_points=[p1, p2]) == [
-        QPointF(10, 20),
-        QPointF(30, 40),
-    ]
-
-
-def test_normalize_bbox_points_rejects_wrong_length() -> None:
-    with pytest.raises(ValueError, match="Expected 2 points"):
-        _normalize_bbox_points(bbox_points=[QPointF(0, 0)])
 
 
 @pytest.mark.gui

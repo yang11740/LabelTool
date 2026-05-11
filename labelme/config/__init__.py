@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from collections.abc import Sized
 from pathlib import Path
@@ -63,17 +62,6 @@ def _migrate_config_from_file(config_from_yaml: dict) -> None:
 
     if config_from_yaml.get("shortcuts", {}).pop("add_point_to_edge", None):
         logger.info("Migrating old config: removing shortcuts.add_point_to_edge")
-
-    if (model_name := config_from_yaml.get("ai", {}).get("default")) and (
-        m := re.match(r"^SegmentAnything \((.*)\)$", model_name)
-    ):
-        model_name_new: str = f"Sam ({m.group(1)})"
-        logger.info(
-            "Migrating old config: ai.default={!r} -> ai.default={!r}",
-            model_name,
-            model_name_new,
-        )
-        config_from_yaml["ai"]["default"] = model_name_new
 
     # Migrate polygon shortcut keys to shape
     _POLYGON_TO_SHAPE_RENAMES = {

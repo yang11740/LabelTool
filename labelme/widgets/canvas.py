@@ -5,11 +5,8 @@ import enum
 from collections.abc import Callable
 from typing import Any
 from typing import Final
-from typing import Literal
 
-import imgviz
 import numpy as np
-# import osam
 from loguru import logger
 from PyQt5 import QtCore
 from PyQt5 import QtGui
@@ -19,11 +16,7 @@ from PyQt5.QtCore import QPointF
 from PyQt5.QtCore import Qt
 
 import labelme.utils
-# from labelme._automation import OsamSession
-from labelme._automation import polygon_from_mask
 from labelme.shape import Shape
-
-from .download import download_ai_model
 
 CURSOR_DEFAULT = Qt.ArrowCursor
 CURSOR_POINT = Qt.PointingHandCursor
@@ -81,10 +74,6 @@ class Canvas(QtWidgets.QWidget):
 
     _pan_anchor: QPointF | None
 
-    _osam_session_model_name: str = "sam2:latest"
-    _osam_session: OsamSession | None
-    _ai_output_format: Literal["polygon", "mask"] = "polygon"
-
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         self.epsilon: float = kwargs.pop("epsilon", 10.0)
         self.double_click = kwargs.pop("double_click", "close")
@@ -102,8 +91,6 @@ class Canvas(QtWidgets.QWidget):
                 "line": False,
                 "point": False,
                 "linestrip": False,
-                "ai_points_to_shape": False,
-                "ai_box_to_shape": True,
             },
         )
         super().__init__(*args, **kwargs)
@@ -121,7 +108,6 @@ class Canvas(QtWidgets.QWidget):
         self.prev_move_point = QPointF()
         self.offsets = QPointF(), QPointF()
         self.scale: float = 1.0
-        self._osam_session = None
         self._hide_background: bool = False
         self.hide_background: bool = False
         self.snapping = True
@@ -154,58 +140,9 @@ class Canvas(QtWidgets.QWidget):
             "line",
             "point",
             "linestrip",
-            "ai_points_to_shape",
-            "ai_box_to_shape",
         ]:
             raise ValueError(f"Unsupported create_mode: {value}")
         self._create_mode = value
-
-    def get_ai_model_name(self) -> str:
-        return self._osam_session_model_name
-
-    def set_ai_model_name(self, model_name: str) -> None:
-        self._osam_session_model_name = model_name
-
-    def set_ai_output_format(self, output_format: Literal["polygon", "mask"]) -> None:
-        self._ai_output_format = output_format
-
-    def _get_osam_session(self) -> OsamSession:
-        if (
-            self._osam_session is None
-            or self._osam_session.model_name != self._osam_session_model_name
-        ):
-            self._osam_session = OsamSession(model_name=self._osam_session_model_name)
-        return self._osam_session
-
-    def _shapes_from_points_ai(
-        self, points: list[QPointF], point_labels: list[int]
-    ) -> list[Shape]:
-        image: np.ndarray = labelme.utils.img_qt_to_arr(img_qt=self.pixmap.toImage())
-        response: osam.types.GenerateResponse = self._get_osam_session().run(
-            image=imgviz.asrgb(image),  # type: ignore[arg-type]
-            image_id=str(self._pixmap_hash),
-            points=np.array([[p.x(), p.y()] for p in points]),
-            point_labels=np.array(point_labels),
-        )
-        return _shapes_from_ai_response(
-            response=response,
-            output_format=self._ai_output_format,
-        )
-
-    def _shapes_from_bbox_ai(self, bbox_points: list[QPointF]) -> list[Shape]:
-        bbox_points = _normalize_bbox_points(bbox_points=bbox_points)
-        image: np.ndarray = labelme.utils.img_qt_to_arr(img_qt=self.pixmap.toImage())
-        response: osam.types.GenerateResponse = self._get_osam_session().run(
-            image=imgviz.asrgb(image),  # type: ignore[arg-type]
-            image_id=str(self._pixmap_hash),
-            points=np.array([[p.x(), p.y()] for p in bbox_points]),
-            # point_labels: 2=box corner, 3=opposite box corner (SAM convention)
-            point_labels=np.array([2, 3]),
-        )
-        return _shapes_from_ai_response(
-            response=response,
-            output_format=self._ai_output_format,
-        )
 
     def backup_shapes(self) -> None:
         self.shape_backups.append([s.copy() for s in self.shapes])
@@ -321,16 +258,6 @@ class Canvas(QtWidgets.QWidget):
     def _get_create_mode_message(self) -> str:
         assert self.drawing()
         is_new: bool = self.current is None
-        if self.create_mode == "ai_points_to_shape":
-            return self.tr(
-                "Click points to include or Shift+Click to exclude."
-                " Ctrl+LeftClick ends creation."
-            )
-        if self.create_mode == "ai_box_to_shape":
-            if is_new:
-                return self.tr("Click first corner of bbox for AI segmentation")
-            else:
-                return self.tr("Click opposite corner to segment object")
         if self.create_mode == "line":
             if is_new:
                 return self.tr("Click start point for line")
@@ -391,13 +318,7 @@ class Canvas(QtWidgets.QWidget):
         self.pan_request.emit(QPoint(int(step.x()), int(step.y())))
 
     def _track_drawing_cursor(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
-        LINE_SHAPE_TYPE_OVERRIDES: Final[dict[str, str]] = {
-            "ai_points_to_shape": "points",
-            "ai_box_to_shape": "rectangle",
-        }
-        self.line.shape_type = LINE_SHAPE_TYPE_OVERRIDES.get(
-            self.create_mode, self.create_mode
-        )
+        self.line.shape_type = self.create_mode
         self._apply_cursor(CURSOR_DRAW)
         if self.current is None:
             self.update()
@@ -447,13 +368,7 @@ class Canvas(QtWidgets.QWidget):
         if mode in ("polygon", "linestrip"):
             self.line.points = [current[-1], pos]
             self.line.point_labels = [1, 1]
-        elif mode == "ai_points_to_shape":
-            self.line.points = [current.points[-1], pos]
-            self.line.point_labels = [
-                current.point_labels[-1],
-                0 if is_shift_pressed else 1,
-            ]
-        elif mode in ("rectangle", "ai_box_to_shape"):
+        elif mode == "rectangle":
             if is_shift_pressed:
                 pos = _snap_cursor_pos_for_square(pos=pos, opposite_vertex=current[0])
                 self.prev_move_point = pos
@@ -641,7 +556,7 @@ class Canvas(QtWidgets.QWidget):
             self.line[0] = current[-1]
             if current.is_closed():
                 self.finalise()
-        elif mode in ("rectangle", "circle", "line", "ai_box_to_shape"):
+        elif mode in ("rectangle", "circle", "line"):
             assert len(current.points) == 1
             current.points = self.line.points
             self.finalise()
@@ -649,15 +564,6 @@ class Canvas(QtWidgets.QWidget):
             current.add_point(self.line[1])
             self.line[0] = current[-1]
             if int(modifiers) == Qt.ControlModifier:
-                self.finalise()
-        elif mode == "ai_points_to_shape":
-            current.add_point(
-                self.line.points[1],
-                label=self.line.point_labels[1],
-            )
-            self.line.points[0] = current.points[-1]
-            self.line.point_labels[0] = current.point_labels[-1]
-            if modifiers & Qt.ControlModifier:
                 self.finalise()
 
     def _start_new_shape(
@@ -667,32 +573,18 @@ class Canvas(QtWidgets.QWidget):
         is_shift_pressed: bool,
     ) -> None:
         mode = self.create_mode
-        if mode in ("ai_points_to_shape", "ai_box_to_shape") and not download_ai_model(
-            model_name=self._osam_session_model_name, parent=self
-        ):
-            return
-
-        initial_shape_type = {
-            "ai_points_to_shape": "points",
-            "ai_box_to_shape": "rectangle",
-        }.get(mode, mode)
-        new_shape = Shape(shape_type=initial_shape_type)
-        new_shape.add_point(pos, label=0 if is_shift_pressed else 1)
+        new_shape = Shape(shape_type=mode)
+        new_shape.add_point(pos)
         self.current = new_shape
 
         if mode == "point":
-            self.finalise()
-            return
-        if mode == "ai_points_to_shape" and event.modifiers() & Qt.ControlModifier:
             self.finalise()
             return
 
         if mode == "circle":
             new_shape.shape_type = "circle"
         self.line.points = [pos, pos]
-        self.line.point_labels = (
-            [0, 0] if mode == "ai_points_to_shape" and is_shift_pressed else [1, 1]
-        )
+        self.line.point_labels = [1, 1]
         self.set_hide_background()
         self.drawing_polygon.emit(True)
         self.update()
@@ -851,8 +743,6 @@ class Canvas(QtWidgets.QWidget):
             return False
         if not self.current:
             return False
-        if self.create_mode == "ai_points_to_shape":
-            return True
         if self.create_mode == "linestrip":
             return len(self.current) >= 2
         return len(self.current) >= 3
@@ -1099,8 +989,6 @@ class Canvas(QtWidgets.QWidget):
             return None
         if self.create_mode == "polygon":
             return self._build_polygon_preview(current=self.current)
-        if self.create_mode == "ai_points_to_shape":
-            return self._build_ai_points_preview(current=self.current)
         return None
 
     def _build_polygon_preview(self, current: Shape) -> Shape:
@@ -1117,20 +1005,6 @@ class Canvas(QtWidgets.QWidget):
             )
             preview.fill_color.setAlpha(64)
         preview.add_point(point=self.line[1])
-        return preview
-
-    def _build_ai_points_preview(self, current: Shape) -> Shape:
-        preview: Shape = current.copy()
-        preview.add_point(
-            point=self.line.points[1],
-            label=self.line.point_labels[1],
-        )
-        ai_shapes = self._shapes_from_points_ai(
-            points=preview.points,
-            point_labels=preview.point_labels,
-        )
-        if ai_shapes:
-            return ai_shapes[0]
         return preview
 
     def _transform_point_widget_to_image(self, point: QPointF) -> QPointF:
@@ -1168,13 +1042,6 @@ class Canvas(QtWidgets.QWidget):
 
     def _build_new_shapes_from_current(self) -> list[Shape]:
         assert self.current is not None
-        if self.create_mode == "ai_points_to_shape":
-            return self._shapes_from_points_ai(
-                points=self.current.points,
-                point_labels=self.current.point_labels,
-            )
-        if self.create_mode == "ai_box_to_shape":
-            return self._shapes_from_bbox_ai(bbox_points=self.current.points)
         self.current.close()
         return [self.current]
 
@@ -1309,18 +1176,12 @@ class Canvas(QtWidgets.QWidget):
 
     def undo_last_line(self) -> None:
         assert self.shapes
-        if self.create_mode in ("ai_points_to_shape", "ai_box_to_shape"):
-            # Remove all unlabeled shapes at the tail (added by AI in one shot)
-            while self.shapes and self.shapes[-1].label is None:
-                self.shapes.pop()
-            self._cancel_current_shape()
-            return
         self.current = self.shapes.pop()
         self.current.open()
         self.current.unrefine()
         if self.create_mode in ("polygon", "linestrip"):
             self.line.points = [self.current[-1], self.current[0]]
-        elif self.create_mode in ("rectangle", "line", "circle", "ai_box_to_shape"):
+        elif self.create_mode in ("rectangle", "line", "circle"):
             self.current.points = self.current.points[0:1]
         elif self.create_mode == "point":
             self.current = None
@@ -1397,87 +1258,6 @@ class Canvas(QtWidgets.QWidget):
         self.hovered_edge = None
         self._last_hovered_edge = None
         self.update()
-
-
-def _shape_from_annotation(
-    annotation: osam.types.Annotation,
-    output_format: Literal["polygon", "mask"],
-) -> Shape | None:
-    if annotation.mask is None:
-        return None
-
-    mask: np.ndarray = annotation.mask
-
-    if output_format == "mask":
-        if annotation.bounding_box is None:
-            return None
-        bb = annotation.bounding_box
-        shape = Shape()
-        shape.refine(
-            shape_type="mask",
-            points=[QPointF(bb.xmin, bb.ymin), QPointF(bb.xmax, bb.ymax)],
-            point_labels=[1, 1],
-            mask=mask,
-        )
-        shape.close()
-        return shape
-    elif output_format == "polygon":
-        points = polygon_from_mask.compute_polygon_from_mask(mask=mask)
-        if len(points) < 2:
-            return None
-        if annotation.bounding_box is not None:
-            bb = annotation.bounding_box
-            points = points + np.array([bb.xmin, bb.ymin], dtype=np.float32)
-        shape = Shape()
-        shape.refine(
-            shape_type="polygon",
-            points=[QPointF(point[0], point[1]) for point in points],
-            point_labels=[1] * len(points),
-        )
-        shape.close()
-        return shape
-    raise ValueError(f"Unsupported output_format: {output_format!r}")
-
-
-def _shapes_from_ai_response(
-    response: osam.types.GenerateResponse,
-    output_format: Literal["polygon", "mask"],
-) -> list[Shape]:
-    if output_format not in ["polygon", "mask"]:
-        raise ValueError(
-            f"output_format must be 'polygon' or 'mask', not {output_format}"
-        )
-
-    if not response.annotations:
-        logger.warning("No annotations returned")
-        return []
-
-    annotations = sorted(
-        response.annotations,
-        key=lambda a: a.score if a.score is not None else 0,
-        reverse=True,
-    )
-
-    shapes: list[Shape] = []
-    for annotation in annotations:
-        shape = _shape_from_annotation(
-            annotation=annotation, output_format=output_format
-        )
-        if shape is not None:
-            shapes.append(shape)
-    return shapes
-
-
-def _normalize_bbox_points(bbox_points: list[QPointF]) -> list[QPointF]:
-    if len(bbox_points) != 2:
-        raise ValueError(f"Expected 2 points for bbox, got {len(bbox_points)}")
-
-    p1, p2 = bbox_points
-    xmin = min(p1.x(), p2.x())
-    ymin = min(p1.y(), p2.y())
-    xmax = max(p1.x(), p2.x())
-    ymax = max(p1.y(), p2.y())
-    return [QPointF(xmin, ymin), QPointF(xmax, ymax)]
 
 
 def _snap_cursor_pos_for_square(pos: QPointF, opposite_vertex: QPointF) -> QPointF:

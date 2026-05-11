@@ -13,16 +13,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from typing import Final
-from typing import Literal
 from typing import NamedTuple
-from typing import TypeAlias
 from typing import cast
-from typing import get_args
 
 import imgviz
 import natsort
 import numpy as np
-# import osam
 from loguru import logger
 from numpy.typing import NDArray
 from PyQt5 import QtCore
@@ -33,17 +29,12 @@ from PyQt5.QtWidgets import QMessageBox
 
 from labelme import __appname__
 from labelme import __version__
-# from labelme._automation import bbox_from_text
-# from labelme._automation._osam_session import OsamSession
 from labelme._label_file import LabelFile
 from labelme._label_file import LabelFileError
 from labelme._label_file import ShapeDict
 from labelme._shape_clipboard import ShapeClipboard
 from labelme.config import load_config
 from labelme.shape import Shape
-# from labelme.widgets import AiAssistedAnnotationWidget
-# from labelme.widgets import AiTextToAnnotationWidget
-# from labelme.widgets import BrightnessContrastDialog
 from labelme.widgets import Canvas
 from labelme.widgets import LabelDialog
 from labelme.widgets import LabelListWidget
@@ -52,9 +43,6 @@ from labelme.widgets import StatusStats
 from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
-# from labelme.widgets import download_ai_model
-
-# from labelme.widgets import format_shape_label
 
 from . import utils
 
@@ -73,14 +61,6 @@ class _ZoomMode(enum.Enum):
     FIT_WINDOW = enum.auto()
     FIT_WIDTH = enum.auto()
     MANUAL_ZOOM = enum.auto()
-
-
-_TextToAnnotationCreateMode: TypeAlias = Literal["polygon", "rectangle"]
-_AI_CREATE_MODES: tuple[str, ...] = (
-    "ai_points_to_shape",
-    "ai_box_to_shape",
-)
-_AI_MODELS_WITHOUT_POINT_SUPPORT: tuple[str, ...] = ("sam3:latest",)
 
 
 class _StatusBarWidgets(NamedTuple):
@@ -135,8 +115,6 @@ class _Actions(NamedTuple):
     create_line_mode: QtWidgets.QAction
     create_point_mode: QtWidgets.QAction
     create_line_strip_mode: QtWidgets.QAction
-    create_ai_points_to_shape_mode: QtWidgets.QAction
-    create_ai_box_to_shape_mode: QtWidgets.QAction
     open_next_img: QtWidgets.QAction
     open_prev_img: QtWidgets.QAction
     keep_prev_scale: QtWidgets.QAction
@@ -173,7 +151,6 @@ class MainWindow(QtWidgets.QMainWindow):
     _config_file: Path | None
     _config: dict
 
-    _text_osam_session: OsamSession | None = None
     _is_changed: bool = False
     _shape_clipboard: ShapeClipboard
     _zoom_mode: _ZoomMode
@@ -184,8 +161,6 @@ class MainWindow(QtWidgets.QMainWindow):
     _actions: _Actions
     _menus: _Menus
     _label_dialog: LabelDialog
-    _ai_annotation: AiAssistedAnnotationWidget
-    _ai_text: AiTextToAnnotationWidget
 
     _output_dir: Path | None
     _image: QtGui.QImage
@@ -255,19 +230,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._actions.paste.setEnabled
         )
         self._menus = self._setup_menus()
-
-        # self._ai_annotation = AiAssistedAnnotationWidget(
-        #     default_model=self._config["ai"]["default"],
-        #     on_model_changed=self._canvas_widgets.canvas.set_ai_model_name,
-        #     on_output_format_changed=self._canvas_widgets.canvas.set_ai_output_format,
-        #     parent=self,
-        # )
-        # self._ai_annotation.setEnabled(False)
-
-        # self._ai_text = AiTextToAnnotationWidget(
-        #     on_submit=self._submit_ai_prompt, parent=self
-        # )
-        # self._ai_text.setEnabled(False)
 
         self._setup_toolbars()
 
@@ -532,24 +494,6 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Start drawing linestrip. Ctrl+LeftClick ends creation."),
             enabled=False,
         )
-        create_ai_points_to_shape_mode = action(
-            self.tr("AI-Points"),
-            lambda: self._switch_canvas_mode(
-                edit=False, create_mode="ai_points_to_shape"
-            ),
-            None,
-            "ai-points.svg",
-            self.tr("Click points to segment object. Ctrl+LeftClick ends creation."),
-            enabled=False,
-        )
-        create_ai_box_to_shape_mode = action(
-            self.tr("AI-Box"),
-            lambda: self._switch_canvas_mode(edit=False, create_mode="ai_box_to_shape"),
-            None,
-            "ai-box.svg",
-            self.tr("Draw a bounding box to segment object."),
-            enabled=False,
-        )
         open_next_img = action(
             text=self.tr("&Next Image"),
             slot=self._open_next_image,
@@ -701,8 +645,6 @@ class MainWindow(QtWidgets.QMainWindow):
             ("point", create_point_mode),
             ("line", create_line_mode),
             ("linestrip", create_line_strip_mode),
-            # ("ai_points_to_shape", create_ai_points_to_shape_mode),
-            # ("ai_box_to_shape", create_ai_box_to_shape_mode),
         ]
         zoom = (
             self._canvas_widgets.zoom_widget,
@@ -720,8 +662,6 @@ class MainWindow(QtWidgets.QMainWindow):
             create_line_mode,
             create_point_mode,
             create_line_strip_mode,
-            # create_ai_points_to_shape_mode,
-            # create_ai_box_to_shape_mode,
             brightness_contrast,
         )
         # 加入我们的export_visual
@@ -782,8 +722,6 @@ class MainWindow(QtWidgets.QMainWindow):
             create_line_mode=create_line_mode,
             create_point_mode=create_point_mode,
             create_line_strip_mode=create_line_strip_mode,
-            create_ai_points_to_shape_mode=create_ai_points_to_shape_mode,
-            create_ai_box_to_shape_mode=create_ai_box_to_shape_mode,
             open_next_img=open_next_img,
             open_prev_img=open_prev_img,
             keep_prev_scale=keep_prev_scale,
@@ -916,12 +854,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def _setup_toolbars(self) -> None:
-        # select_ai_model = QtWidgets.QWidgetAction(self)
-        # select_ai_model.setDefaultWidget(self._ai_annotation)
-
-        # ai_prompt_action = QtWidgets.QWidgetAction(self)
-        # ai_prompt_action.setDefaultWidget(self._ai_text)
-
         self.addToolBar(
             Qt.TopToolBarArea,
             ToolBar(
@@ -951,9 +883,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 font_base=self.font(),
             ),
         )
-        # self._ai_annotation.hover_highlight_requested.connect(
-        #     self._highlight_ai_buttons
-        # )
 
     def _setup_app_state(
         self,
@@ -1241,77 +1170,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def show_status_message(self, message: str, delay: int = 500) -> None:
         self.statusBar().showMessage(message, delay)
 
-    def _submit_ai_prompt(self, _: bool) -> None:
-        # create_mode = self._canvas_widgets.canvas.create_mode
-        # shape_type = _resolve_text_annotation_shape_type(
-        #     create_mode=create_mode,
-        #     ai_output_format=self._ai_annotation.output_format,
-        # )
-        # if shape_type is None:
-        #     logger.warning("Unsupported create_mode={!r}", create_mode)
-        #     return
-
-        # texts = self._ai_text.get_text_prompt().split(",")
-
-        # model_name: str = self._ai_text.get_model_name()
-        # model_type = osam.apis.get_model_type_by_name(model_name)
-        # if not (_is_already_downloaded := model_type.get_size() is not None):
-        #     if not download_ai_model(model_name=model_name, parent=self):
-        #         return
-        # if (
-        #     self._text_osam_session is None
-        #     or self._text_osam_session.model_name != model_name
-        # ):
-        #     self._text_osam_session = OsamSession(model_name=model_name)
-
-        # boxes, scores, labels, masks = bbox_from_text.get_bboxes_from_texts(
-        #     session=self._text_osam_session,
-        #     image=utils.img_qt_to_arr(self._image)[:, :, :3],
-        #     image_id=str(hash(self._image_path)),
-        #     texts=texts,
-        # )
-
-        # SCORE_FOR_EXISTING_SHAPE: Final[float] = 1.01
-        # for shape in self._canvas_widgets.canvas.shapes:
-        #     if shape.shape_type != shape_type or shape.label not in texts:
-        #         continue
-        #     boxes = np.r_[boxes, [_shape_to_xyxy_bbox(shape)]]
-        #     scores = np.r_[scores, [SCORE_FOR_EXISTING_SHAPE]]
-        #     labels = np.r_[labels, [texts.index(shape.label)]]
-
-        # boxes, scores, labels, indices = bbox_from_text.nms_bboxes(
-        #     boxes=boxes,
-        #     scores=scores,
-        #     labels=labels,
-        #     iou_threshold=self._ai_text.get_iou_threshold(),
-        #     score_threshold=self._ai_text.get_score_threshold(),
-        #     max_num_detections=100,
-        # )
-
-        # is_new = scores != SCORE_FOR_EXISTING_SHAPE
-        # boxes = boxes[is_new]
-        # scores = scores[is_new]
-        # labels = labels[is_new]
-        # indices = indices[is_new]
-
-        # if masks is not None:
-        #     masks = [masks[i] for i in indices]
-        # del indices
-
-        # shapes: list[Shape] = bbox_from_text.get_shapes_from_bboxes(
-        #     boxes=boxes,
-        #     scores=scores,
-        #     labels=labels,
-        #     texts=texts,
-        #     masks=masks,
-        #     shape_type=shape_type,
-        # )
-
-        # self._canvas_widgets.canvas.backup_shapes()
-        # self._load_shapes(shapes, replace=False)
-        # self.mark_dirty()
-        pass
-
     def reset_state(self) -> None:
         self._docks.label_list.clear()
         self._image_path = None
@@ -1342,19 +1200,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _switch_canvas_mode(
         self, edit: bool = True, create_mode: str | None = None
     ) -> None:
-        # if create_mode == "ai_points_to_shape":
-        #     model_name = self._canvas_widgets.canvas.get_ai_model_name()
-        #     if model_name in _AI_MODELS_WITHOUT_POINT_SUPPORT:
-        #         QtWidgets.QMessageBox.warning(
-        #             self,
-        #             self.tr("AI-Points Unavailable"),
-        #             self.tr(
-        #                 "%s does not support point prompts.\n"
-        #                 "Please select a different model or use AI-Box mode."
-        #             )
-        #             % model_name,
-        #         )
-        #         return
         self._canvas_widgets.canvas.set_editing(edit)
         if create_mode is not None:
             self._canvas_widgets.canvas.create_mode = create_mode
@@ -1365,22 +1210,6 @@ class MainWindow(QtWidgets.QMainWindow):
             for draw_mode, draw_action in self._actions.draw:
                 draw_action.setEnabled(create_mode != draw_mode)
         self._actions.edit_mode.setEnabled(not edit)
-
-    def _highlight_ai_buttons(self, highlight: bool) -> None:
-        HIGHLIGHT_COLOR: Final = "#FFFFCC"
-        BORDER_COLOR: Final = "#E6E6A0"
-        bg = HIGHLIGHT_COLOR if highlight else "transparent"
-        border = BORDER_COLOR if highlight else "transparent"
-        style = (
-            "QToolButton:!checked:!pressed {"
-            f" background-color: {bg}; border: 1px solid {border};"
-            " }"
-        )
-        for mode, action in self._actions.draw:
-            if mode in _AI_CREATE_MODES:
-                for widget in action.associatedWidgets():
-                    if isinstance(widget, QtWidgets.QToolButton):
-                        widget.setStyleSheet(style)
 
     def show_label_list_menu(self, point: QtCore.QPoint) -> None:
         # PyQt5 stubs type QMenu.exec() argument too narrowly
@@ -2640,6 +2469,53 @@ class MainWindow(QtWidgets.QMainWindow):
 
         shapes = self._canvas_widgets.canvas.shapes
         node_centers = {}
+        fm = painter.fontMetrics()
+        text_margin = max(4, image.width() // 500)
+
+        # 碰撞检测：记录已放置的文本边界矩形，避免重叠
+        placed_rects: list[QtCore.QRectF] = []
+
+        def _find_non_overlap_position(
+            base_x: float,
+            base_y: float,
+            text_w: float,
+            text_h: float,
+        ) -> QtCore.QPointF:
+            """贪心搜索寻找与已放置文本不重叠的位置。"""
+            # 尝试的偏移方向：(dx, dy)
+            # 优先向上偏移，其次右上、左上、向右、向左、向下
+            offsets: list[tuple[float, float]] = [(0, 0)]
+            step = text_h + text_margin
+            for k in range(1, 8):
+                offsets.append((0, -k * step))  # 向上
+                offsets.append((text_w + text_margin, -k * step))  # 右上
+                offsets.append((-(text_w + text_margin), -k * step))  # 左上
+                offsets.append((text_w + text_margin, 0))  # 右
+                offsets.append((-(text_w + text_margin), 0))  # 左
+                offsets.append((0, k * step))  # 向下
+
+            for dx, dy in offsets:
+                candidate = QtCore.QRectF(
+                    base_x + dx, base_y + dy - text_h, text_w, text_h
+                )
+                # 检查是否在图片范围内
+                if candidate.left() < 0 or candidate.right() > image.width():
+                    continue
+                if candidate.top() < 0 or candidate.bottom() > image.height():
+                    continue
+                # 检查是否与已有文本重叠
+                overlap = False
+                for pr in placed_rects:
+                    if candidate.intersects(pr):
+                        overlap = True
+                        break
+                if not overlap:
+                    placed_rects.append(candidate)
+                    return QtCore.QPointF(base_x + dx, base_y + dy)
+            # 所有位置都重叠，回退到默认位置
+            fallback = QtCore.QRectF(base_x, base_y - text_h, text_w, text_h)
+            placed_rects.append(fallback)
+            return QtCore.QPointF(base_x, base_y)
 
         # 第一次遍历：画多边形/框、文本，并记录中心点位置
         for shape in shapes:
@@ -2671,26 +2547,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 node_centers[node_id] = center_pt
 
             # 绘制文本 (Node ID + 转写内容截断)
-            text_x, text_y = points[0].x(), points[0].y() - 10
+            base_x, base_y = points[0].x(), points[0].y() - text_margin
             text_content = (
                 f"[{node_id}] {transcription[:15]}..."
                 if transcription
                 else f"[{node_id}] {shape.label}"
             )
 
-            # 加个纯色背景让字更清晰
-            fm = painter.fontMetrics()
             text_rect = fm.boundingRect(text_content)
+            text_w, text_h = text_rect.width(), text_rect.height()
+
+            # 使用碰撞检测找到不重叠的文本位置
+            draw_pos = _find_non_overlap_position(base_x, base_y, text_w, text_h)
+
+            # 加个纯色背景让字更清晰
             bg_rect = QtCore.QRectF(
-                text_x,
-                text_y - text_rect.height(),
-                text_rect.width(),
-                text_rect.height(),
+                draw_pos.x(),
+                draw_pos.y() - text_h,
+                text_w + text_margin,
+                text_h + text_margin,
             )
             painter.fillRect(bg_rect, QtGui.QColor(255, 255, 255, 180))  # 白色半透明底
 
             painter.setPen(QtGui.QPen(QtCore.Qt.black))
-            painter.drawText(QtCore.QPointF(text_x, text_y), text_content)
+            painter.drawText(draw_pos, text_content)
 
         # 第二次遍历：连线 添加逻辑边
         pen_edge = QtGui.QPen(QtCore.Qt.blue)
@@ -2717,8 +2597,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     mid_y = (start_pt.y() + end_pt.y()) / 2
                     relation_text = edge.get("relation", "")
 
+                    # 关系文本也做碰撞检测
+                    rel_rect = fm.boundingRect(relation_text)
+                    rel_pos = _find_non_overlap_position(
+                        mid_x, mid_y, rel_rect.width(), rel_rect.height()
+                    )
+
                     painter.setPen(QtGui.QPen(QtCore.Qt.red))
-                    painter.drawText(QtCore.QPointF(mid_x, mid_y), relation_text)
+                    painter.drawText(rel_pos, relation_text)
                     painter.setPen(pen_edge)  # 恢复虚线画笔给下一条线用
 
         painter.end()
@@ -2768,23 +2654,6 @@ def _shapes_from_dicts(
 
         shapes.append(shape)
     return shapes
-
-
-def _resolve_text_annotation_shape_type(
-    *, create_mode: str, ai_output_format: Literal["rectangle", "polygon", "mask"]
-) -> Literal["rectangle", "polygon", "mask"] | None:
-    if create_mode in _AI_CREATE_MODES:
-        return ai_output_format
-    if create_mode in get_args(_TextToAnnotationCreateMode):
-        return cast(_TextToAnnotationCreateMode, create_mode)
-    return None
-
-
-def _shape_to_xyxy_bbox(shape: Shape) -> NDArray[np.float32]:
-    points = np.array([[p.x(), p.y()] for p in shape.points])
-    xmin, ymin = points.min(axis=0)
-    xmax, ymax = points.max(axis=0)
-    return np.array([xmin, ymin, xmax, ymax], dtype=np.float32)
 
 
 def _rgb_from_colormap_id(*, label_id: int) -> tuple[int, int, int]:

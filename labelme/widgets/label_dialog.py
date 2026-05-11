@@ -38,16 +38,15 @@ class LabelQComboBox(QtWidgets.QComboBox):
         pass
 
 
-# 这是源代码的Type文本框逻辑
-# class LabelQLineEdit(QtWidgets.QLineEdit):
-#     def set_list_widget(self, list_widget: QtWidgets.QListWidget) -> None:
-#         self.list_widget = list_widget
+class LabelQLineEdit(QtWidgets.QLineEdit):
+    def set_list_widget(self, list_widget: QtWidgets.QListWidget) -> None:
+        self.list_widget = list_widget
 
-#     def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
-#         if a0.key() in [QtCore.Qt.Key_Up, QtCore.Qt.Key_Down]:
-#             self.list_widget.keyPressEvent(a0)
-#         else:
-#             super().keyPressEvent(a0)
+    def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
+        if a0.key() in [QtCore.Qt.Key_Up, QtCore.Qt.Key_Down]:
+            self.list_widget.keyPressEvent(a0)
+        else:
+            super().keyPressEvent(a0)
 
 
 class LabelDialog(QtWidgets.QDialog):
