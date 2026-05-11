@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Konva canvas 容器样式 */
+.konva-container {
+  @apply overflow-hidden rounded border border-gray-300 bg-white;
+}
+
+.konva-container canvas {
+  display: block;
+}
