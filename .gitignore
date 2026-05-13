@@ -12,3 +12,16 @@
 # OS / IDE
 .DS_Store
 .idea/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Backend
+backend/.venv/
+backend/*.egg-info/
+__pycache__/
+
+# Claude local settings
+.claude/settings.local.json
