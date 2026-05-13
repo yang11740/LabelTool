@@ -9,9 +9,8 @@
 - **节点级属性标注** — 每个标注框（节点）拥有独立 ID、类型(Type)、文本转写(Transcription)、图层深度(Z-Index)、颜色(Color)等字段，完整存储于 JSON 标注文件中。
 - **18 种预设节点类型** — 涵盖正文(MAIN_TEXT)、夹注(INTERLINEAR_ANNOTATION)、眉批(SIDE_MARGINALIA)、增补(ADD_TEXT)、删除(DELETE_TEXT)、符号占位(SYMBOL_PLACEHOLDER)、印章/墨渍(INK_BLOT)、编辑标记(EDIT_MARK:*) 等手稿常见元素。
 - **逻辑关系边** — 支持为每个节点配置多条指向其他节点的关系边（READS_AFTER / ANNOTATES / INSERTS_AT / REPLACES / OVERLAPS / REPRESENTS）。
-- **一键可视化导出** — `Ctrl+E` 将标注框、节点 ID、转写文本截断以及节点间的虚线逻辑连线直接渲染到原图上，导出高清图片，方便审核、论文配图或沟通汇报。
+- **一键可视化导出** — 将标注框、节点 ID、转写文本以及节点间的虚线逻辑连线直接渲染到原图上，导出高清图片，方便审核、论文配图或沟通汇报。
 - **精简打包** — 移除了原版的 AI/SAM 自动分割模块，大幅缩减包体积并避免 onnxruntime 等依赖的 DLL 冲突问题。
-- **多语言支持** — 内置 18 种语言的界面翻译（含简体中文）。
 - **完全离线运行** — 无需网络，纯本地标注。
 
 ---
@@ -20,45 +19,22 @@
 
 ### 环境要求
 
-- Python 3.10+
-- Windows / Linux / macOS
+- Windows 10+（推荐）
 
-### 从源码安装
+### 下载安装
 
-```bash
-git clone <repo-url>
-cd LabelmeDev
-uv sync
-```
+1. 前往 [Releases](https://github.com/yang11740/LabelTool/releases) 页面
+2. 下载最新的 `手稿识别标注工具.zip`
+3. 解压缩到任意目录
+4. 双击运行 `手稿识别标注工具.exe` 即可
 
-### 启动
-
-```bash
-uv run labelme
-```
-
-或指定图片/目录直接打开：
-
-```bash
-uv run labelme /path/to/image.jpg
-uv run labelme /path/to/image_folder/
-```
-
-### 打包为 Windows EXE
-
-```bash
-uv run pyinstaller 手稿识别标注工具.spec
-```
-
-输出文件位于 `dist/手稿识别标注工具.exe`。
-
----
+> **提示**：首次启动可能需要 10–20 秒，请耐心等待。建议将程序固定在任务栏或桌面快捷方式以便日常使用。
 
 ## 使用说明
 
 ### 1. 打开图片
 
-点击工具栏 **Open** 按钮，或 `Ctrl+O` 选择图片文件。也可打开一个文件夹 (`Ctrl+U`) 批量处理。
+点击工具栏 **Open** 按钮，或 `Ctrl+O` 选择图片文件。也可打开一个文件夹 (`Ctrl+U`) 批量处理目录下的所有图片。
 
 ### 2. 绘制标注框
 
@@ -86,7 +62,7 @@ uv run pyinstaller 手稿识别标注工具.spec
 
 ### 4. 保存
 
-- `Ctrl+S` — 保存为同名 JSON 文件
+- `Ctrl+S` — 保存为同名 JSON 文件（与图片同目录）
 - `Ctrl+Shift+S` — 另存为
 
 ### 5. 导出可视化图片
@@ -123,18 +99,5 @@ uv run pyinstaller 手稿识别标注工具.spec
   ]
 }
 ```
-
----
-
-## 开发
-
-```bash
-make test             # 运行测试
-make lint             # 代码检查
-make format           # 自动格式化
-make update_translate # 更新翻译文件
-```
-
----
 
 **基于 [Labelme](https://github.com/wkentaro/labelme) 二次开发 | 维护者: shemufan**
