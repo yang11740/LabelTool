@@ -52,7 +52,8 @@ class Shape:
         # ===增加我们需要的专属参数专属参数 ===
         node_id: str = "",
         type: str = "",
-        transcription: str = "",
+        transcription_raw: str = "",
+        transcription_semantic: str = "",
         attributes: dict[str, Any] | None = None,
         edges: list[dict[str, str]] | None = None,
     ) -> None:
@@ -78,11 +79,22 @@ class Shape:
         self.node_id = node_id
         # 如果没有单独传 type，就默认取 label 的值
         self.type = type if type else (label if label else "")
-        self.transcription = transcription
-        # 设置默认的图层深度和颜色属性
-        self.attributes = (
-            attributes if attributes is not None else {"z_index": 0, "color": "black"}
-        )
+        self.transcription_raw = transcription_raw
+        self.transcription_semantic = transcription_semantic
+        # 设置默认的图层深度、颜色、辨识度、阅读序、书写风格属性
+        _default_attrs = {
+            "z_index": 0,
+            "color": "black",
+            "vague": False,
+            "reading_direction": "RTL",
+            "handwriting_style": "",
+        }
+        if attributes is None:
+            self.attributes = dict(_default_attrs)
+        else:
+            merged = dict(_default_attrs)
+            merged.update(attributes)
+            self.attributes = merged
         # 初始化逻辑边数组
         self.edges = edges if edges is not None else []
 
@@ -120,7 +132,7 @@ class Shape:
     @shape_type.setter
     def shape_type(self, value: str | None) -> None:
         if value is None:
-            value = "polygon"
+            value = "rectangle"
         if value not in [
             "polygon",
             "rectangle",

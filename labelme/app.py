@@ -1271,7 +1271,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if not edit_description:
                 self._label_dialog.edit_description.setDisabled(True)
 
-            # 调用我们改写后的 popup，传入和接住 8 个值
+            # 调用我们改写后的 popup，传入和接住 9 个值
             popup_res = self._label_dialog.popup(
                 text=first_shape.label if edit_text else "",
                 flags=first_shape.flags if edit_flags else None,
@@ -1279,7 +1279,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 description=first_shape.description if edit_description else None,
                 flags_disabled=not edit_flags,
                 node_id=first_shape.node_id if len(items) == 1 else "",
-                transcription=first_shape.transcription if len(items) == 1 else "",
+                transcription_raw=(
+                    first_shape.transcription_raw if len(items) == 1 else ""
+                ),
+                transcription_semantic=(
+                    first_shape.transcription_semantic if len(items) == 1 else ""
+                ),
                 attributes=first_shape.attributes if len(items) == 1 else None,
                 edges=first_shape.edges if len(items) == 1 else None,
             )
@@ -1289,7 +1294,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 group_id,
                 description,
                 node_id,
-                transcription,
+                transcription_raw,
+                transcription_semantic,
                 attributes,
                 edges,
             ) = popup_res
@@ -1342,8 +1348,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 # 给编辑的 Shape 赋新值
                 if node_id is not None:
                     shape.node_id = node_id
-                if transcription is not None:
-                    shape.transcription = transcription
+                if transcription_raw is not None:
+                    shape.transcription_raw = transcription_raw
+                if transcription_semantic is not None:
+                    shape.transcription_semantic = transcription_semantic
                 if attributes is not None:
                     shape.attributes = attributes
                 if edges is not None:
@@ -1614,7 +1622,7 @@ class MainWindow(QtWidgets.QMainWindow):
         description = ""
         if self._config["display_label_popup"] or not text:
             previous_text = self._label_dialog.edit.text()
-            # 使用新 popup 接收 8 个返回值
+            # 使用新 popup 接收 9 个返回值
             popup_res = self._label_dialog.popup(text)
             (
                 text,
@@ -1622,7 +1630,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 group_id,
                 description,
                 node_id,
-                transcription,
+                transcription_raw,
+                transcription_semantic,
                 attributes,
                 edges,
             ) = popup_res
@@ -1648,7 +1657,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 # 为新建的 Shape 绑定收集到的新数据
                 shape.type = text
                 shape.node_id = node_id
-                shape.transcription = transcription
+                shape.transcription_raw = transcription_raw
+                shape.transcription_semantic = transcription_semantic
                 shape.attributes = attributes
                 shape.edges = edges
 
@@ -2452,93 +2462,57 @@ class MainWindow(QtWidgets.QMainWindow):
         if not save_path:
             return
 
-        # 2. 拷贝当前原图底底板
-        image = self._image.copy()
-
-        # 3. 准备 QPainter 画图
+        # 2. 创建扩展画布：左侧原图，右侧额外 60% 纯白区域用于图例
         from PyQt5 import QtGui, QtCore
 
-        painter = QtGui.QPainter(image)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing)  # 抗锯齿
+        orig_w = self._image.width()
+        orig_h = self._image.height()
+        canvas_w = int(orig_w * 1.6)
+        canvas_h = orig_h
 
-        # 动态自适应字体大小 (按图片高度比例算)
-        font = painter.font()
-        font.setPointSize(max(15, image.height() // 50))
-        font.setBold(True)
-        painter.setFont(font)
+        canvas = QtGui.QImage(canvas_w, canvas_h, QtGui.QImage.Format_ARGB32)
+        canvas.fill(QtCore.Qt.white)
+
+        painter = QtGui.QPainter(canvas)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
+        # 将原图绘制到画布左侧
+        painter.drawImage(0, 0, self._image)
 
         shapes = self._canvas_widgets.canvas.shapes
-        node_centers = {}
-        fm = painter.fontMetrics()
-        text_margin = max(4, image.width() // 500)
 
-        # 碰撞检测：记录已放置的文本边界矩形，避免重叠
-        placed_rects: list[QtCore.QRectF] = []
+        # ---- 左侧区域：绘制标注框、连线、仅 node_id ----
+        shape_font = painter.font()
+        shape_font.setPointSize(max(12, orig_h // 60))
+        shape_font.setBold(True)
+        painter.setFont(shape_font)
+        shape_fm = painter.fontMetrics()
 
-        def _find_non_overlap_position(
-            base_x: float,
-            base_y: float,
-            text_w: float,
-            text_h: float,
-        ) -> QtCore.QPointF:
-            """贪心搜索寻找与已放置文本不重叠的位置。"""
-            # 尝试的偏移方向：(dx, dy)
-            # 优先向上偏移，其次右上、左上、向右、向左、向下
-            offsets: list[tuple[float, float]] = [(0, 0)]
-            step = text_h + text_margin
-            for k in range(1, 8):
-                offsets.append((0, -k * step))  # 向上
-                offsets.append((text_w + text_margin, -k * step))  # 右上
-                offsets.append((-(text_w + text_margin), -k * step))  # 左上
-                offsets.append((text_w + text_margin, 0))  # 右
-                offsets.append((-(text_w + text_margin), 0))  # 左
-                offsets.append((0, k * step))  # 向下
+        node_centers: dict[str, QtCore.QPointF] = {}
 
-            for dx, dy in offsets:
-                candidate = QtCore.QRectF(
-                    base_x + dx, base_y + dy - text_h, text_w, text_h
-                )
-                # 检查是否在图片范围内
-                if candidate.left() < 0 or candidate.right() > image.width():
-                    continue
-                if candidate.top() < 0 or candidate.bottom() > image.height():
-                    continue
-                # 检查是否与已有文本重叠
-                overlap = False
-                for pr in placed_rects:
-                    if candidate.intersects(pr):
-                        overlap = True
-                        break
-                if not overlap:
-                    placed_rects.append(candidate)
-                    return QtCore.QPointF(base_x + dx, base_y + dy)
-            # 所有位置都重叠，回退到默认位置
-            fallback = QtCore.QRectF(base_x, base_y - text_h, text_w, text_h)
-            placed_rects.append(fallback)
-            return QtCore.QPointF(base_x, base_y)
-
-        # 第一次遍历：画多边形/框、文本，并记录中心点位置
         for shape in shapes:
             points = shape.points
             if not points:
                 continue
 
-            # 提取我们新增的属性
             node_id = getattr(shape, "node_id", "")
-            transcription = getattr(shape, "transcription", "")
+            attr_color = getattr(shape, "attributes", {}).get("color", "black")
+            color = QtGui.QColor(attr_color)
 
-            # 画多边形/框
-            pen = QtGui.QPen(shape.line_color)
-            pen.setWidth(max(2, image.width() // 500))
+            # 绘制标注框轮廓
+            pen = QtGui.QPen(color)
+            pen.setWidth(max(2, orig_w // 500))
             painter.setPen(pen)
 
             path = shape.to_path()
             painter.drawPath(path)
 
-            # 画半透明填充
-            painter.fillPath(path, shape.fill_color)
+            # 半透明填充
+            fill = QtGui.QColor(color)
+            fill.setAlpha(64)
+            painter.fillPath(path, fill)
 
-            # 计算中心点(用于画连线)
+            # 计算中心点 (用于连线)
             cx = sum(p.x() for p in points) / len(points)
             cy = sum(p.y() for p in points) / len(points)
             center_pt = QtCore.QPointF(cx, cy)
@@ -2546,36 +2520,26 @@ class MainWindow(QtWidgets.QMainWindow):
             if node_id:
                 node_centers[node_id] = center_pt
 
-            # 绘制文本 (Node ID + 转写内容截断)
-            base_x, base_y = points[0].x(), points[0].y() - text_margin
-            text_content = (
-                f"[{node_id}] {transcription[:15]}..."
-                if transcription
-                else f"[{node_id}] {shape.label}"
-            )
+            # 仅绘制极简 node_id (如 "[n1]")
+            if node_id:
+                base_x = points[0].x()
+                base_y = points[0].y() - 4
+                label_text = f"[{node_id}]"
 
-            text_rect = fm.boundingRect(text_content)
-            text_w, text_h = text_rect.width(), text_rect.height()
+                text_rect = shape_fm.boundingRect(label_text)
+                tw, th = text_rect.width(), text_rect.height()
 
-            # 使用碰撞检测找到不重叠的文本位置
-            draw_pos = _find_non_overlap_position(base_x, base_y, text_w, text_h)
+                # 白色半透明背景
+                bg = QtCore.QRectF(base_x, base_y - th, tw + 6, th + 6)
+                painter.fillRect(bg, QtGui.QColor(255, 255, 255, 200))
 
-            # 加个纯色背景让字更清晰
-            bg_rect = QtCore.QRectF(
-                draw_pos.x(),
-                draw_pos.y() - text_h,
-                text_w + text_margin,
-                text_h + text_margin,
-            )
-            painter.fillRect(bg_rect, QtGui.QColor(255, 255, 255, 180))  # 白色半透明底
+                painter.setPen(QtGui.QPen(QtCore.Qt.black))
+                painter.drawText(QtCore.QPointF(base_x + 3, base_y), label_text)
 
-            painter.setPen(QtGui.QPen(QtCore.Qt.black))
-            painter.drawText(draw_pos, text_content)
-
-        # 第二次遍历：连线 添加逻辑边
+        # 绘制逻辑连线 (edges)
         pen_edge = QtGui.QPen(QtCore.Qt.blue)
-        pen_edge.setWidth(max(2, image.width() // 400))
-        pen_edge.setStyle(QtCore.Qt.DashLine)  # 使用虚线画连线
+        pen_edge.setWidth(max(2, orig_w // 400))
+        pen_edge.setStyle(QtCore.Qt.DashLine)
         painter.setPen(pen_edge)
 
         for shape in shapes:
@@ -2589,29 +2553,97 @@ class MainWindow(QtWidgets.QMainWindow):
                     start_pt = node_centers[source_id]
                     end_pt = node_centers[target_id]
 
-                    # 画两点之间的连线
                     painter.drawLine(start_pt, end_pt)
 
-                    # 在连线中点画出关系类型(Relation)
+                    # 连线中点绘制关系类型
                     mid_x = (start_pt.x() + end_pt.x()) / 2
                     mid_y = (start_pt.y() + end_pt.y()) / 2
                     relation_text = edge.get("relation", "")
 
-                    # 关系文本也做碰撞检测
-                    rel_rect = fm.boundingRect(relation_text)
-                    rel_pos = _find_non_overlap_position(
-                        mid_x, mid_y, rel_rect.width(), rel_rect.height()
-                    )
+                    if relation_text:
+                        rel_rect = shape_fm.boundingRect(relation_text)
+                        rw, rh = rel_rect.width(), rel_rect.height()
+                        rbg = QtCore.QRectF(
+                            mid_x + 4, mid_y - rh, rw + 4, rh + 4
+                        )
+                        painter.fillRect(rbg, QtGui.QColor(255, 255, 255, 200))
 
-                    painter.setPen(QtGui.QPen(QtCore.Qt.red))
-                    painter.drawText(rel_pos, relation_text)
-                    painter.setPen(pen_edge)  # 恢复虚线画笔给下一条线用
+                        painter.setPen(QtGui.QPen(QtCore.Qt.red))
+                        painter.drawText(QtCore.QPointF(mid_x + 6, mid_y), relation_text)
+                        painter.setPen(pen_edge)
+
+        # ---- 右侧区域：图例文本列表 ----
+        legend_left = orig_w + 20
+        legend_width = canvas_w - legend_left - 20
+        y = 30
+
+        legend_font = painter.font()
+        legend_font.setPointSize(max(10, orig_h // 70))
+        legend_font.setBold(False)
+        painter.setFont(legend_font)
+        legend_fm = painter.fontMetrics()
+        line_height = legend_fm.height() + 8
+
+        def _wrap_text(text: str, max_w: int, fm: QtGui.QFontMetrics) -> list[str]:
+            """简单自动换行：字符级折行，同时兼顾中英文。"""
+            lines: list[str] = []
+            cur = ""
+            for ch in text:
+                test = cur + ch
+                if fm.boundingRect(test).width() <= max_w:
+                    cur = test
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = ch
+            if cur:
+                lines.append(cur)
+            return lines if lines else [text]
+
+        painter.setPen(QtGui.QPen(QtCore.Qt.black))
+
+        for shape in shapes:
+            node_id = getattr(shape, "node_id", "")
+            if not node_id:
+                continue
+
+            transcription_semantic = getattr(shape, "transcription_semantic", "")
+            transcription_raw = getattr(shape, "transcription_raw", "")
+            transcription = transcription_semantic or transcription_raw
+
+            label_type = shape.label or "UNKNOWN"
+            if transcription:
+                line_text = f"[{node_id}] ({label_type}): {transcription}"
+            else:
+                line_text = f"[{node_id}] ({label_type})"
+
+            wrapped = _wrap_text(line_text, legend_width, legend_fm)
+            for wline in wrapped:
+                painter.drawText(legend_left, y + legend_fm.ascent(), wline)
+                y += line_height
+
+            y += 4  # 不同 shape 之间额外间距
 
         painter.end()
 
-        # 4. 保存为图片
-        image.save(save_path)
+        # 4. 保存
+        canvas.save(save_path)
         self.show_status_message(self.tr("导出可视化图片成功: %s") % save_path)
+
+
+_DEFAULT_ATTRS = {
+    "z_index": 0,
+    "color": "black",
+    "vague": False,
+    "reading_direction": "RTL",
+    "handwriting_style": "",
+}
+
+
+def _with_default_attrs(attrs: dict) -> dict:
+    merged = dict(_DEFAULT_ATTRS)
+    merged.update(attrs)
+    return merged
 
 
 # 3. 在读文件的时候实例化我们增加的属性
@@ -2631,8 +2663,11 @@ def _shapes_from_dicts(
             # 新增字段传递给 Shape 内存对象
             node_id=shape_dict.get("node_id", ""),
             type=shape_dict.get("type", shape_dict["label"]),
-            transcription=shape_dict.get("transcription", ""),
-            attributes=shape_dict.get("attributes", {"z_index": 0, "color": "black"}),
+            transcription_raw=shape_dict.get("transcription_raw", ""),
+            transcription_semantic=shape_dict.get("transcription_semantic", ""),
+            attributes=_with_default_attrs(
+                shape_dict.get("attributes", {})
+            ),
             edges=shape_dict.get("edges", []),
         )
         for x, y in shape_dict["points"]:
@@ -2721,29 +2756,21 @@ def _make_image_list_item(
     return item
 
 
-# 4. 在保存文件时将增加的属性打包进字典
+# 4. 在保存文件时将增加的属性打包进字典（外圆内方：clean JSON）
 def _shape_to_dict(shape: Shape) -> dict[str, Any]:
-    data = shape.other_data.copy()
-    data.update(
-        label=shape.label,
-        points=[(p.x(), p.y()) for p in shape.points],
-        group_id=shape.group_id,
-        description=shape.description,
-        shape_type=shape.shape_type,
-        flags=shape.flags,
-        mask=(
-            None
-            if shape.mask is None
-            else utils.img_arr_to_b64(shape.mask.astype(np.uint8))
+    return {
+        "node_id": shape.node_id,
+        "group_id": (
+            f"G_{shape.group_id}" if shape.group_id is not None else None
         ),
-        # 将 Shape 对象的新增属性写入 JSON 字典
-        node_id=shape.node_id,
-        type=shape.type,
-        transcription=shape.transcription,
-        attributes=shape.attributes,
-        edges=shape.edges,
-    )
-    return data
+        "type": shape.type,
+        "shape_type": shape.shape_type,
+        "transcription_raw": shape.transcription_raw,
+        "transcription_semantic": shape.transcription_semantic,
+        "points": [(p.x(), p.y()) for p in shape.points],
+        "attributes": shape.attributes,
+        "edges": shape.edges,
+    }
 
 
 def _scan_image_files(root_dir: str) -> list[str]:
@@ -2775,7 +2802,9 @@ def format_shape_label(shape: Shape) -> str:
     node_id = getattr(shape, "node_id", "")
     label_type = shape.label or ""
     group_id = shape.group_id if shape.group_id is not None else ""
-    transcription = getattr(shape, "transcription", "")
+    transcription_semantic = getattr(shape, "transcription_semantic", "")
+    transcription_raw = getattr(shape, "transcription_raw", "")
+    transcription = transcription_semantic or transcription_raw
 
     parts = []
     if node_id:

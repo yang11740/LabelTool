@@ -35,7 +35,8 @@ class ShapeDict(TypedDict):
     # 增加我们需要标注的字段
     node_id: str
     type: str
-    transcription: str
+    transcription_raw: str
+    transcription_semantic: str
     attributes: dict[str, Any]
     edges: list[dict[str, str]]
 
@@ -52,7 +53,8 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
         # 标注项目的字段
         "node_id",
         "type",
-        "transcription",
+        "transcription_raw",
+        "transcription_semantic",
         "attributes",
         "edges",
     }
@@ -85,7 +87,7 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
 
     # 我们的逻辑：没有该变量 就设置默认值为多边形
     if "shape_type" not in shape_json_obj:
-        shape_json_obj["shape_type"] = "polygon"
+        shape_json_obj["shape_type"] = "rectangle"
 
     # 原文件逻辑：没有shape_type 直接报错弹出
     # if "shape_type" not in shape_json_obj:
@@ -114,10 +116,21 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
         description = shape_json_obj["description"]
 
     group_id: int | None = None
-    if shape_json_obj.get("group_id") is not None:
-        if not isinstance(shape_json_obj["group_id"], int):
-            raise TypeError(f"group_id must be int: {shape_json_obj['group_id']}")
-        group_id = shape_json_obj["group_id"]
+    raw_gid = shape_json_obj.get("group_id")
+    if raw_gid is not None:
+        if isinstance(raw_gid, str) and raw_gid.startswith("G_"):
+            try:
+                group_id = int(raw_gid[2:])
+            except ValueError:
+                raise TypeError(
+                    f"group_id must be int or 'G_<int>', got: {raw_gid!r}"
+                )
+        elif isinstance(raw_gid, int):
+            group_id = raw_gid
+        else:
+            raise TypeError(
+                f"group_id must be int or 'G_<int>', got: {raw_gid!r}"
+            )
 
     mask: NDArray[np.bool_] | None = None
     if shape_json_obj.get("mask") is not None:
@@ -130,12 +143,31 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
     # 对额外需要的数据进行提取和初始化
     node_id: str = shape_json_obj.get("node_id", "")
     type_val: str = shape_json_obj.get("type", label)  # 默认回退为 label
-    transcription: str = shape_json_obj.get("transcription", "")
 
-    # Attributes: z_index (图层深度) 和 color (色彩)
-    attributes: dict = shape_json_obj.get(
-        "attributes", {"z_index": 0, "color": "black"}
-    )
+    # 向后兼容：如果旧 JSON 有 transcription 但缺少新字段，自动迁移到 semantic
+    if (
+        "transcription" in shape_json_obj
+        and "transcription_raw" not in shape_json_obj
+    ):
+        shape_json_obj.setdefault("transcription_raw", "")
+        shape_json_obj.setdefault(
+            "transcription_semantic", shape_json_obj.pop("transcription")
+        )
+    transcription_raw: str = shape_json_obj.get("transcription_raw", "")
+    transcription_semantic: str = shape_json_obj.get("transcription_semantic", "")
+
+    # Attributes: z_index (图层深度), color (色彩), vague (无法辨识),
+    # reading_direction (阅读序), handwriting_style (书写风格)
+    _default_attrs = {
+        "z_index": 0,
+        "color": "black",
+        "vague": False,
+        "reading_direction": "RTL",
+        "handwriting_style": "",
+    }
+    attributes: dict = shape_json_obj.get("attributes", {})
+    for k, v in _default_attrs.items():
+        attributes.setdefault(k, v)
 
     # Edges: 关系边
     edges: list = shape_json_obj.get("edges", [])
@@ -154,7 +186,8 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
         # 封装额外字段
         node_id=node_id,
         type=type_val,
-        transcription=transcription,
+        transcription_raw=transcription_raw,
+        transcription_semantic=transcription_semantic,
         attributes=attributes,
         edges=edges,
     )

@@ -95,6 +95,8 @@ class LabelDialog(QtWidgets.QDialog):
             "EDIT_MARK:inversion_mark",
             "EDIT_MARK:deletion_line",
             "EDIT_MARK:comment_mark",
+            "PREPRINTED_TEXT",
+            "RED_SEAL_STAMP",
         ]
         self.edit.addItems([""] + node_types)  # 第一个留空
 
@@ -116,10 +118,18 @@ class LabelDialog(QtWidgets.QDialog):
         self.edit_node_id = QtWidgets.QLineEdit()
         self.edit_node_id.setPlaceholderText("Node ID (如: n_main_1)")
 
-        # 2. Transcription (转写内容)
-        self.edit_transcription = QtWidgets.QTextEdit()
-        self.edit_transcription.setPlaceholderText("转写文本 (Transcription)")
-        self.edit_transcription.setFixedHeight(50)
+        # 2. Transcription (转写内容) — 双轨制：视觉忠实层 + 语义校勘层
+        self.edit_transcription_raw = QtWidgets.QTextEdit()
+        self.edit_transcription_raw.setPlaceholderText(
+            "视觉忠实层 — 逐字转录原文 (Raw)"
+        )
+        self.edit_transcription_raw.setFixedHeight(50)
+
+        self.edit_transcription_semantic = QtWidgets.QTextEdit()
+        self.edit_transcription_semantic.setPlaceholderText(
+            "语义校勘层 — 规范化/校勘后文本 (Semantic)"
+        )
+        self.edit_transcription_semantic.setFixedHeight(50)
 
         # 3. Z-Index (图层深度)
         self.combo_z_index = QtWidgets.QComboBox()
@@ -136,6 +146,17 @@ class LabelDialog(QtWidgets.QDialog):
         # 4. Color (颜色)
         self.combo_color = QtWidgets.QComboBox()
         self.combo_color.addItems(["black", "red", "other"])
+
+        # 4b. Vague (无法辨识)
+        self.check_vague = QtWidgets.QCheckBox("Vague (无法辨识)")
+
+        # 4c. Reading Direction (阅读序)
+        self.combo_reading_direction = QtWidgets.QComboBox()
+        self.combo_reading_direction.addItems(["RTL", "LTR"])
+
+        # 4d. Handwriting Style (书写风格)
+        self.edit_handwriting_style = QtWidgets.QLineEdit()
+        self.edit_handwriting_style.setPlaceholderText("书写风格 (如: xingshu)")
 
         # 5. Edges (单条逻辑边快速配置，复杂情况建议后期或二次开发列表)
         self.edit_target_id = QtWidgets.QLineEdit()
@@ -171,9 +192,19 @@ class LabelDialog(QtWidgets.QDialog):
         layout_attr.addWidget(QtWidgets.QLabel("颜色(Color):"))
         layout_attr.addWidget(self.combo_color, 2)
         layout.addLayout(layout_attr)
-        # 第三行：转写文本
-        layout.addWidget(QtWidgets.QLabel("文本转写 (Transcription):"))
-        layout.addWidget(self.edit_transcription)
+        # 第二行半：扩展属性 (Vague / Reading Direction / Handwriting Style)
+        layout_attr2 = QtWidgets.QHBoxLayout()
+        layout_attr2.addWidget(self.check_vague)
+        layout_attr2.addWidget(QtWidgets.QLabel("阅读序:"))
+        layout_attr2.addWidget(self.combo_reading_direction, 1)
+        layout_attr2.addWidget(QtWidgets.QLabel("书写风格:"))
+        layout_attr2.addWidget(self.edit_handwriting_style, 2)
+        layout.addLayout(layout_attr2)
+        # 第三行：转写文本 — 双轨制
+        layout.addWidget(QtWidgets.QLabel("视觉忠实层 (Raw):"))
+        layout.addWidget(self.edit_transcription_raw)
+        layout.addWidget(QtWidgets.QLabel("语义校勘层 (Semantic):"))
+        layout.addWidget(self.edit_transcription_semantic)
         # 第四行：逻辑边配置(表格)
         layout_edge_header = QtWidgets.QHBoxLayout()
         layout_edge_header.addWidget(QtWidgets.QLabel("逻辑边配置 (Edges):"))
@@ -366,7 +397,8 @@ class LabelDialog(QtWidgets.QDialog):
         flags_disabled: bool = False,
         # 增加我们需要的参数
         node_id: str = "",
-        transcription: str = "",
+        transcription_raw: str = "",
+        transcription_semantic: str = "",
         attributes: dict[str, Any] | None = None,
         edges: list[dict[str, str]] | None = None,
     ) -> (
@@ -377,10 +409,11 @@ class LabelDialog(QtWidgets.QDialog):
             str,
             str,
             str,
+            str,
             dict[str, Any],
             list[dict[str, str]],
         ]
-        | tuple[None, None, None, None, None, None, None, None]
+        | tuple[None, None, None, None, None, None, None, None, None]
     ):
         if self._fit_to_content["row"]:
             self.label_list.setMinimumHeight(
@@ -408,8 +441,11 @@ class LabelDialog(QtWidgets.QDialog):
             self.edit_group_id.setText(str(group_id))
         # 恢复增加的属性到UI控件(状态回显)
         self.edit_node_id.setText(str(node_id) if node_id is not None else "")
-        self.edit_transcription.setPlainText(
-            str(transcription) if transcription is not None else ""
+        self.edit_transcription_raw.setPlainText(
+            str(transcription_raw) if transcription_raw is not None else ""
+        )
+        self.edit_transcription_semantic.setPlainText(
+            str(transcription_semantic) if transcription_semantic is not None else ""
         )
         if attributes:
             # 恢复 Z-Index
@@ -426,9 +462,26 @@ class LabelDialog(QtWidgets.QDialog):
             c_idx = self.combo_color.findText(str(c_val))
             if c_idx >= 0:
                 self.combo_color.setCurrentIndex(c_idx)
+
+            # 恢复 Vague
+            self.check_vague.setChecked(attributes.get("vague", False))
+
+            # 恢复 Reading Direction
+            rd_val = attributes.get("reading_direction", "RTL")
+            rd_idx = self.combo_reading_direction.findText(str(rd_val))
+            if rd_idx >= 0:
+                self.combo_reading_direction.setCurrentIndex(rd_idx)
+
+            # 恢复 Handwriting Style
+            self.edit_handwriting_style.setText(
+                attributes.get("handwriting_style", "")
+            )
         else:
             # 如果是新建的框，重置下拉菜单，防止残留上一个框的属性
             self.combo_z_index.setCurrentIndex(0)
+            self.check_vague.setChecked(False)
+            self.combo_reading_direction.setCurrentIndex(0)
+            self.edit_handwriting_style.clear()
 
         # 清空并遍历加载所有的边
         self._clear_edges_table()
@@ -458,7 +511,13 @@ class LabelDialog(QtWidgets.QDialog):
             # 提取图层和颜色组装 attributes
             z_idx = self.combo_z_index.currentIndex()
             c_val = self.combo_color.currentText()
-            out_attributes = {"z_index": z_idx, "color": c_val}
+            out_attributes = {
+                "z_index": z_idx,
+                "color": c_val,
+                "vague": self.check_vague.isChecked(),
+                "reading_direction": self.combo_reading_direction.currentText(),
+                "handwriting_style": self.edit_handwriting_style.text().strip(),
+            }
 
             # 遍历表格 提取逻辑边组装 edges
             out_edges = []
@@ -478,11 +537,14 @@ class LabelDialog(QtWidgets.QDialog):
                 self._current_flags(),  # 1: flags
                 self._current_group_id(),  # 2: group_id
                 self.edit_description.toPlainText(),  # 3: description
-                self.edit_node_id.text().strip(),  # 4: node_id #
-                self.edit_transcription.toPlainText().strip(),  # 5: transcription #
-                out_attributes,  # 6: attributes #
-                out_edges,
-            )  # 7: edges #
+                self.edit_node_id.text().strip(),  # 4: node_id
+                self.edit_transcription_raw.toPlainText().strip(),
+                # 5: transcription_raw
+                self.edit_transcription_semantic.toPlainText().strip(),
+                # 6: transcription_semantic
+                out_attributes,  # 7: attributes
+                out_edges,  # 8: edges
+            )
         else:
             # 用户点击取消，返回同样长度的全 None 元组
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None

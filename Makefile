@@ -19,13 +19,13 @@ setup:  # Setup the development environment
 	$(call exec,uv sync)
 
 lint: update_translate  # Lint code
-	$(call exec,uv run ruff format --check)
-	$(call exec,uv run ruff check)
-	$(call exec,uv run ty check --no-progress)
-	$(call exec,uv run taplo fmt --check $(shell git ls-files "*.toml"))
-	$(call exec,uv run mdformat --check $(shell git ls-files "*.md"))
-	$(call exec,uv run yamlfix --check $(shell git ls-files "*.yml" "*.yaml"))
-	$(call exec,uv run typos)
+	$(call exec,ruff format --check)
+	$(call exec,ruff check)
+	$(call exec,ty check --no-progress)
+	$(call exec,taplo fmt --check $(shell git ls-files "*.toml"))
+	$(call exec,mdformat --check $(shell git ls-files "*.md"))
+	$(call exec,yamlfix --check $(shell git ls-files "*.yml" "*.yaml"))
+	$(call exec,typos)
 	$(call exec,git diff --exit-code labelme/translate)
 	@if grep -r 'type="unfinished"' labelme/translate/*.ts; then \
 		printf '\033[1;31mError: unfinished translations found\033[0m\n'; \
@@ -33,17 +33,17 @@ lint: update_translate  # Lint code
 	fi
 
 format:  # Format code
-	$(call exec,uv run ruff format)
-	$(call exec,uv run ruff check --fix)
-	$(call exec,uv run taplo fmt $(shell git ls-files "*.toml"))
-	$(call exec,uv run mdformat $(shell git ls-files "*.md"))
-	$(call exec,uv run yamlfix $(shell git ls-files "*.yml" "*.yaml"))
+	$(call exec,ruff format)
+	$(call exec,ruff check --fix)
+	$(call exec,taplo fmt $(shell git ls-files "*.toml"))
+	$(call exec,mdformat $(shell git ls-files "*.md"))
+	$(call exec,yamlfix $(shell git ls-files "*.yml" "*.yaml"))
 
 test:  # Run tests
-	$(call exec,uv run pytest -v tests/ $(PYTEST_ARGS))
+	$(call exec,pytest -v tests/ $(PYTEST_ARGS))
 
 update_translate:
-	$(call exec,uv run tools/update_translate.py)
+	$(call exec,tools/update_translate.py)
 
 coverage:  # Run tests with coverage
-	$(call exec,uv run pytest -v tests/ --numprocesses=auto --cov=labelme --cov-report=term-missing)
+	$(call exec,pytest -v tests/ --numprocesses=auto --cov=labelme --cov-report=term-missing)
