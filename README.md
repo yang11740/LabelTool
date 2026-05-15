@@ -6,10 +6,10 @@
 
 ## 项目特点
 
-- **节点级属性标注** — 每个标注框（节点）拥有独立 ID、类型(Type)、文本转写(Transcription)、图层深度(Z-Index)、颜色(Color)等字段，完整存储于 JSON 标注文件中。
-- **18 种预设节点类型** — 涵盖正文(MAIN_TEXT)、夹注(INTERLINEAR_ANNOTATION)、眉批(SIDE_MARGINALIA)、增补(ADD_TEXT)、删除(DELETE_TEXT)、符号占位(SYMBOL_PLACEHOLDER)、印章/墨渍(INK_BLOT)、编辑标记(EDIT_MARK:*) 等手稿常见元素。
+- **节点级属性标注** — 每个标注框（节点）拥有独立 ID、类型(Type)、文本转写(Transcription(忠实层和校勘层))、图层深度(Z-Index)、颜色(Color)、阅读顺序(reading_direction)、书写风格(handwriting_style)等字段，完整存储于 JSON 标注文件中。
+- **20 种预设节点类型** — 涵盖正文(MAIN_TEXT)、夹注(INTERLINEAR_ANNOTATION)、眉批(SIDE_MARGINALIA)、增补(ADD_TEXT)、删除(DELETE_TEXT)、符号占位(SYMBOL_PLACEHOLDER)、印章/墨渍(INK_BLOT)、编辑标记(EDIT_MARK:*) 等手稿常见元素。
 - **逻辑关系边** — 支持为每个节点配置多条指向其他节点的关系边（READS_AFTER / ANNOTATES / INSERTS_AT / REPLACES / OVERLAPS / REPRESENTS）。
-- **一键可视化导出** — 将标注框、节点 ID、转写文本以及节点间的虚线逻辑连线直接渲染到原图上，导出高清图片，方便审核、论文配图或沟通汇报。
+- **一键可视化导出** — 将标注框、节点ID、逻辑边关系绘制到原图上，将各节点的转义文本绘制到图片右侧的画布上，保证阅读时可以对照。
 - **精简打包** — 移除了原版的 AI/SAM 自动分割模块，大幅缩减包体积并避免 onnxruntime 等依赖的 DLL 冲突问题。
 - **完全离线运行** — 无需网络，纯本地标注。
 
@@ -19,16 +19,15 @@
 
 ### 环境要求
 
-- Windows 10+（推荐）
+- Windows 10+
 
 ### 下载安装
 
 1. 前往 [Releases](https://github.com/yang11740/LabelTool/releases) 页面
-2. 下载最新的 `手稿识别标注工具.zip`
-3. 解压缩到任意目录
-4. 双击运行 `手稿识别标注工具.exe` 即可
+2. 下载最新的 `desktop-v2.exe`到任意目录
+3. 双击运行即可
 
-> **提示**：首次启动可能需要 10–20 秒，请耐心等待。建议将程序固定在任务栏或桌面快捷方式以便日常使用。
+> **提示**：首次启动需要初始化环境，可能需要一段时间。
 
 ## 使用说明
 
@@ -54,7 +53,11 @@
 | 节点 ID (Node ID) | 唯一标识，如 `n_main_1` |
 | 图层 (Z-Index) | 0~4，表示从纸张到印章的视觉层级 |
 | 颜色 (Color) | black / red / other |
-| 文本转写 | 记录该区域的实际文字内容 |
+| 阅读顺序 (reading_direction) | RTL(默认) / LTR |
+| 书写风格 (handwriting_style) | 楷体 / 行书等 |。
+| 无法辨识的模糊标记 (vague) |
+| 视觉忠实层 (transcription_raw) | 看到什么标什么 |
+| 语义校勘层 (transcription_semantic) | 支持补充标点与现代语义校对 |
 | 逻辑边 (Edges) | 点击 ➕ 添加一条指向另一个节点 ID 的关系边 |
 | 备注 | 额外描述信息 |
 
@@ -85,17 +88,27 @@
 
 ```json
 {
-  "label": "MAIN_TEXT",
-  "points": [[x1, y1], [x2, y2], ...],
-  "shape_type": "polygon",
-  "group_id": 1,
-  "node_id": "n_main_1",
+  "group_id": "G_2",
+  "node_id": "n2",
   "type": "MAIN_TEXT",
-  "transcription": "嗟乎\r\n\n风俗之移人",
-  "attributes": {"z_index": 1, "color": "black"},
+  "points": [
+    [152.4, 210.5],
+    [300.8, 850.2]
+  ],
+  "transcription_raw": "其余机件扫数装箱移置于前述之永乐寺备运",
+  "transcription_semantic": "其余机件，扫数装箱移置于，前述之永乐寺备运。",
+  "attributes": {
+    "z_index": 1,
+    "color": "black",
+    "reading_direction": "RTL",
+    "handwriting_style": "楷体",
+    "vague": false
+  },
   "edges": [
-    {"target": "n_main_2", "relation": "READS_AFTER"},
-    {"target": "n_ann_1",  "relation": "ANNOTATES"}
+    {
+      "target": "n3",
+      "relation": "READS_AFTER"
+    }
   ]
 }
 ```
