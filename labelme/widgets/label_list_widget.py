@@ -37,7 +37,9 @@ def format_shape_label(shape: Shape) -> str:
     node_id = getattr(shape, "node_id", "")
     label_type = shape.label or ""
     group_id = shape.group_id if shape.group_id is not None else ""
-    transcription = getattr(shape, "transcription", "")
+    transcription_semantic = getattr(shape, "transcription_semantic", "")
+    transcription_raw = getattr(shape, "transcription_raw", "")
+    transcription = transcription_semantic or transcription_raw
 
     parts = []
     if node_id:
