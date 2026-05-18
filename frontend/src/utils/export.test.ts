@@ -16,14 +16,14 @@ function shape(overrides: Partial<ShapeData> = {}): ShapeData {
     mask: null,
     node_id: "n_1",
     type: "MAIN_TEXT",
-    transcription_raw: "原文",
-    transcription_semantic: "语义",
+    transcription_raw: "raw text",
+    transcription_semantic: "semantic text",
     attributes: {
       z_index: 1,
       color: "black",
       vague: false,
       reading_direction: "RTL",
-      handwriting_style: "楷书",
+      handwriting_style: "regular",
     },
     edges: [{ target: "n_2", relation: "READS_AFTER" }],
     other_data: { custom_field: "kept" },
@@ -32,25 +32,27 @@ function shape(overrides: Partial<ShapeData> = {}): ShapeData {
 }
 
 describe("buildLabelmeJson", () => {
-  it("exports updated desktop-compatible manuscript fields", () => {
+  it("exports compact desktop-compatible manuscript fields", () => {
     const json = buildLabelmeJson([shape()], "001.jpg", 100, 200) as {
       shapes: Array<Record<string, unknown>>;
-      imagePath: string;
       imageHeight: number;
       imageWidth: number;
     };
 
-    expect(json.imagePath).toBe("001.jpg");
     expect(json.imageHeight).toBe(200);
     expect(json.imageWidth).toBe(100);
+    expect(json).not.toHaveProperty("flags");
+    expect(json).not.toHaveProperty("version");
+    expect(json).not.toHaveProperty("imagePath");
+    expect(json).not.toHaveProperty("imageData");
     expect(json.shapes).toHaveLength(1);
     expect(json.shapes[0]).toMatchObject({
       node_id: "n_1",
       group_id: "G_1",
       type: "MAIN_TEXT",
       shape_type: "rectangle",
-      transcription_raw: "原文",
-      transcription_semantic: "语义",
+      transcription_raw: "raw text",
+      transcription_semantic: "semantic text",
       points: [
         [1, 2],
         [3, 4],
@@ -60,11 +62,10 @@ describe("buildLabelmeJson", () => {
         color: "black",
         vague: false,
         reading_direction: "RTL",
-        handwriting_style: "楷书",
+        handwriting_style: "regular",
       },
       edges: [{ target: "n_2", relation: "READS_AFTER" }],
     });
-    expect(json).not.toHaveProperty("imageData");
     expect(json.shapes[0]).not.toHaveProperty("transcription");
     expect(json.shapes[0]).not.toHaveProperty("other_data");
     expect(json.shapes[0]).not.toHaveProperty("label");

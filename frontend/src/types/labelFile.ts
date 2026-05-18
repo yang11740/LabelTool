@@ -54,9 +54,9 @@ export interface ShapeData {
 
 export interface AnnotationDocument {
   version?: string;
-  flags: Record<string, boolean>;
+  flags?: Record<string, boolean>;
   shapes: ShapeData[];
-  imagePath: string;
+  imagePath?: string;
   imageData?: string | null;
   imageHeight: number;
   imageWidth: number;

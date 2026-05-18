@@ -1,18 +1,14 @@
 import type Konva from "konva";
 import type { ShapeData } from "@/types/labelFile";
 
-const APP_VERSION = "6.1.0";
-
-/** Build a standard labelme JSON object from the current annotation state. */
+/** Build the compact desktop-compatible JSON object from annotation state. */
 export function buildLabelmeJson(
   shapes: ShapeData[],
-  imageFileName: string,
+  _imageFileName: string,
   imageWidth: number,
   imageHeight: number,
 ): object {
   return {
-    version: APP_VERSION,
-    flags: {},
     shapes: shapes.map((s) => ({
       node_id: s.node_id,
       group_id: s.group_id,
@@ -30,7 +26,6 @@ export function buildLabelmeJson(
       },
       edges: s.edges,
     })),
-    imagePath: imageFileName,
     imageHeight,
     imageWidth,
   };

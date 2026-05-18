@@ -2,6 +2,7 @@ import { loadShapeJsonObj } from "@/types/labelFile";
 import type { ShapeData } from "@/types/labelFile";
 import { buildLabelmeJson } from "./export";
 import { nextNodeId } from "./shapeFactory";
+import { validateShapesForSave } from "./validation";
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "bmp", "tif", "tiff", "gif", "webp"]);
 
@@ -21,6 +22,14 @@ export interface LoadedLocalWorkspaceImage {
   imageHeight: number;
   shapes: ShapeData[];
   image: LocalWorkspaceImage;
+}
+
+export interface FolderValidationSummary {
+  total: number;
+  valid: number;
+  missing: number;
+  invalid: number;
+  errors: { imageName: string; message: string }[];
 }
 
 export async function openLocalWorkspace(): Promise<LocalWorkspaceImage[]> {
@@ -93,6 +102,38 @@ export async function saveLocalWorkspaceAnnotation(
     hasLabel: true,
     jsonFileHandle,
   };
+}
+
+export async function validateWorkspaceLabels(images: LocalWorkspaceImage[]): Promise<FolderValidationSummary> {
+  const summary: FolderValidationSummary = {
+    total: images.length,
+    valid: 0,
+    missing: 0,
+    invalid: 0,
+    errors: [],
+  };
+
+  for (const image of images) {
+    if (!image.jsonFileHandle) {
+      summary.missing += 1;
+      continue;
+    }
+    try {
+      const shapes = await readShapesFromJsonHandle(image.jsonFileHandle);
+      const validation = validateShapesForSave(ensureUniqueNodeIds(shapes, image.baseName));
+      if (validation.ok) {
+        summary.valid += 1;
+      } else {
+        summary.invalid += 1;
+        summary.errors.push({ imageName: image.name, message: validation.errors[0] ?? "JSON 校验失败" });
+      }
+    } catch (e) {
+      summary.invalid += 1;
+      summary.errors.push({ imageName: image.name, message: (e as Error).message });
+    }
+  }
+
+  return summary;
 }
 
 export async function readShapesFromJsonHandle(

@@ -3,6 +3,8 @@ import { useToast } from "@/context/ToastContext";
 import {
   loadLocalWorkspaceImage,
   openLocalWorkspace,
+  validateWorkspaceLabels,
+  type FolderValidationSummary,
   type LoadedLocalWorkspaceImage,
   type LocalWorkspaceImage,
 } from "@/utils/localWorkspace";
@@ -13,6 +15,7 @@ interface Props {
   savedImage: LocalWorkspaceImage | null;
   onBeforeImageChange: () => Promise<boolean>;
   onLoad: (result: LoadedLocalWorkspaceImage) => void;
+  onFolderValidation: (summary: FolderValidationSummary) => void;
 }
 
 export default function DirBrowser({
@@ -21,9 +24,11 @@ export default function DirBrowser({
   savedImage,
   onBeforeImageChange,
   onLoad,
+  onFolderValidation,
 }: Props) {
   const [images, setImages] = useState<LocalWorkspaceImage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [loadingImage, setLoadingImage] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
   const selectionRequestRef = useRef(0);
@@ -76,6 +81,20 @@ export default function DirBrowser({
       setLoading(false);
     }
   }, [onBeforeImageChange, toast]);
+
+  const handleCheckFolder = useCallback(async () => {
+    if (images.length === 0) return;
+    setChecking(true);
+    try {
+      const summary = await validateWorkspaceLabels(images);
+      onFolderValidation(summary);
+      toast("info", `检查完成：合法 ${summary.valid}，缺失 ${summary.missing}，错误 ${summary.invalid}`);
+    } catch (e) {
+      toast("error", (e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }, [images, onFolderValidation, toast]);
 
   const openOffset = useCallback(
     (offset: number) => {
@@ -151,6 +170,13 @@ export default function DirBrowser({
             title="D / ]"
           >
             下一张
+          </button>
+          <button
+            className="rounded border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-700 disabled:opacity-40"
+            disabled={checking}
+            onClick={handleCheckFolder}
+          >
+            {checking ? "检查中..." : "检查 JSON"}
           </button>
         </>
       )}
