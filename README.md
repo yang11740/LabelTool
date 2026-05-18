@@ -49,16 +49,16 @@
 | 字段 | 说明 |
 |------|------|
 | 节点类型 (Type) | 下拉选择，如 MAIN_TEXT、INTERLINEAR_ANNOTATION 等 |
-| 所属组 (Group ID) | 数字，用于将同一句子的多个标注编组 |
+| 所属组 (Group ID) | 只需要填数字，用于将同一句子的多个标注编组，JSON自动转换为G_n格式 |
 | 节点 ID (Node ID) | 唯一标识，如 `n_main_1` |
 | 图层 (Z-Index) | 0~4，表示从纸张到印章的视觉层级 |
 | 颜色 (Color) | black / red / other |
 | 阅读顺序 (reading_direction) | RTL(默认) / LTR |
-| 书写风格 (handwriting_style) | 楷体 / 行书等 |。
-| 无法辨识的模糊标记 (vague) |
+| 书写风格 (handwriting_style) | 楷体 / 行书等 |
+| 无法辨识的模糊标记 (vague) | 是否有无法辨识的模糊标记 |
 | 视觉忠实层 (transcription_raw) | 看到什么标什么 |
 | 语义校勘层 (transcription_semantic) | 支持补充标点与现代语义校对 |
-| 逻辑边 (Edges) | 点击 ➕ 添加一条指向另一个节点 ID 的关系边 |
+| 逻辑边 (Edges) | 点击 ➕ 添加一条指向另一个节点 ID 的关系边 点击删除可删除该边 |
 | 备注 | 额外描述信息 |
 
 点击 OK 确认，Cancel 取消。
