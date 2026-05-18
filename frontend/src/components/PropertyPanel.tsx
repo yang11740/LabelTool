@@ -36,10 +36,24 @@ const Z_INDEX_OPTIONS = [
 interface Props {
   shape: ShapeData | null;
   allNodeIds: string[];
+  relationType: string;
+  onRelationTypeChange: (relation: string) => void;
   onShapeUpdate: (updated: ShapeData) => void;
+  onCopyPreviousType: () => void;
+  onClearEdges: () => void;
+  onSelectNextUntranscribed: () => void;
 }
 
-export default function PropertyPanel({ shape, allNodeIds, onShapeUpdate }: Props) {
+export default function PropertyPanel({
+  shape,
+  allNodeIds,
+  relationType,
+  onRelationTypeChange,
+  onShapeUpdate,
+  onCopyPreviousType,
+  onClearEdges,
+  onSelectNextUntranscribed,
+}: Props) {
   if (!shape) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center text-sm text-stone-400">
@@ -59,6 +73,35 @@ export default function PropertyPanel({ shape, allNodeIds, onShapeUpdate }: Prop
         <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Manuscript Node</p>
         <h3 className="mt-1 text-base font-semibold text-stone-900">节点属性</h3>
       </div>
+
+      <section className="rounded border border-amber-200 bg-amber-50 p-3">
+        <div className="mb-2 text-xs font-semibold text-amber-900">效率操作</div>
+        <div className="grid grid-cols-2 gap-2">
+          <button className="rounded border border-amber-300 bg-white px-2 py-1 text-xs hover:bg-amber-100" onClick={onCopyPreviousType}>
+            复制上个类型
+          </button>
+          <button className="rounded border border-amber-300 bg-white px-2 py-1 text-xs hover:bg-amber-100" onClick={onClearEdges}>
+            清空关系
+          </button>
+          <button className="col-span-2 rounded border border-amber-300 bg-white px-2 py-1 text-xs hover:bg-amber-100" onClick={onSelectNextUntranscribed}>
+            跳到下一个未转写
+          </button>
+        </div>
+        <label className="mt-2 flex flex-col gap-1">
+          <span className="text-xs text-amber-900">默认关系类型</span>
+          <select
+            className="rounded border border-amber-300 bg-white px-2 py-1 text-xs"
+            value={relationType}
+            onChange={(event) => onRelationTypeChange(event.target.value)}
+          >
+            {RELATIONS.map((relation) => (
+              <option key={relation} value={relation}>
+                {relation}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
 
       <section className="space-y-2">
         <label className="flex flex-col gap-1">
@@ -188,7 +231,7 @@ export default function PropertyPanel({ shape, allNodeIds, onShapeUpdate }: Prop
           <span className="text-xs text-stone-500">关系边 edges</span>
           <button
             className="rounded border border-stone-300 bg-white px-2 py-1 text-xs text-stone-700 hover:bg-stone-100"
-            onClick={() => update({ edges: [...shape.edges, { target: "", relation: "READS_AFTER" }] })}
+            onClick={() => update({ edges: [...shape.edges, { target: "", relation: relationType }] })}
           >
             添加关系
           </button>

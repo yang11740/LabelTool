@@ -9,10 +9,11 @@ import {
   createShapeData,
   distance,
   isMeaningfulShape,
-  nextNodeId,
   rectanglePoints,
   translateShape,
 } from "@/utils/shapeFactory";
+import type { AnnotationMode, NodeIdStrategy } from "@/utils/manuscriptTools";
+import { nextNodeIdForStrategy } from "@/utils/manuscriptTools";
 
 const VERTEX_RADIUS = 5;
 const STROKE_WIDTH = 2;
@@ -45,6 +46,12 @@ interface CanvasProps {
   onShapesPreview: (shapes: ShapeData[]) => void;
   onSelectShape: (id: string | null) => void;
   onModeChange: (mode: DrawMode) => void;
+  annotationMode: AnnotationMode;
+  continuousAnnotation: boolean;
+  nodeIdStrategy: NodeIdStrategy;
+  defaultNodeType: string;
+  onDefaultNodeTypeChange: (type: string) => void;
+  onQuickRelationTarget: (targetId: string) => void;
 }
 
 const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
@@ -58,6 +65,12 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     onShapesPreview,
     onSelectShape,
     onModeChange,
+    annotationMode,
+    continuousAnnotation,
+    nodeIdStrategy,
+    defaultNodeType,
+    onDefaultNodeTypeChange,
+    onQuickRelationTarget,
   },
   ref,
 ) {
@@ -143,12 +156,27 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   const addShape = useCallback(
     (shapeType: ShapeType, points: [number, number][]) => {
       if (!isMeaningfulShape(shapeType, points)) return;
-      const newShape = createShapeData(shapeType, points, { node_id: nextNodeId(shapes) });
+      const nodeId = nextNodeIdForStrategy(shapes, nodeIdStrategy, points, shapeType);
+      const newShape = createShapeData(shapeType, points, {
+        node_id: nodeId,
+        label: defaultNodeType,
+        type: defaultNodeType,
+      });
       onShapesChange([...shapes, newShape]);
       onSelectShape(newShape.node_id);
-      onModeChange("select");
+      onDefaultNodeTypeChange(defaultNodeType);
+      if (!continuousAnnotation) onModeChange("select");
     },
-    [onModeChange, onSelectShape, onShapesChange, shapes],
+    [
+      continuousAnnotation,
+      defaultNodeType,
+      nodeIdStrategy,
+      onDefaultNodeTypeChange,
+      onModeChange,
+      onSelectShape,
+      onShapesChange,
+      shapes,
+    ],
   );
 
   const stagePoint = (e: KonvaEventObject<MouseEvent>): Point | null => {
@@ -383,7 +411,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     (mode === "draw_polygon" || mode === "draw_linestrip") && freehandPoints.length > 0
       ? freehandPoints
       : null;
-  const detailId = mode === "select" ? hoveredId ?? selectedId : null;
+  const detailId = mode === "select" && annotationMode !== "quick_relation" ? hoveredId ?? selectedId : null;
   const detailIndex = shapes.findIndex((shape) => shape.node_id === detailId);
   const detailShape = detailIndex >= 0 ? shapes[detailIndex] : null;
 
@@ -451,7 +479,11 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
               isHovered={shape.node_id === hoveredId && mode === "select"}
               hoverEnabled={mode === "select"}
               onSelect={() => {
-                if (mode === "select") onSelectShape(shape.node_id);
+                if (annotationMode === "quick_relation") {
+                  onQuickRelationTarget(shape.node_id);
+                } else if (mode === "select") {
+                  onSelectShape(shape.node_id);
+                }
               }}
               onHover={(id) => {
                 if (mode === "select") setHoveredId(id);

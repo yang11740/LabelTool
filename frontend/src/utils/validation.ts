@@ -1,12 +1,19 @@
 import { SHAPE_TYPES, type ShapeData } from "@/types/labelFile";
 
+export interface ValidationIssue {
+  message: string;
+  node_id?: string;
+  imageName?: string;
+}
+
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
+  issues: ValidationIssue[];
 }
 
 export function validateShapesForSave(shapes: ShapeData[]): ValidationResult {
-  const errors: string[] = [];
+  const issues: ValidationIssue[] = [];
   const ids = new Set<string>();
   const duplicateIds = new Set<string>();
 
@@ -15,7 +22,7 @@ export function validateShapesForSave(shapes: ShapeData[]): ValidationResult {
     const nodeId = shape.node_id.trim();
 
     if (!nodeId) {
-      errors.push(`第 ${index + 1} 个标注缺少 node_id`);
+      issues.push({ message: `第 ${index + 1} 个标注缺少 node_id` });
     } else if (ids.has(nodeId)) {
       duplicateIds.add(nodeId);
     } else {
@@ -23,26 +30,33 @@ export function validateShapesForSave(shapes: ShapeData[]): ValidationResult {
     }
 
     if (!(SHAPE_TYPES as readonly string[]).includes(shape.shape_type)) {
-      errors.push(`${label} 的 shape_type 非法：${shape.shape_type}`);
+      issues.push({ message: `${label} 的 shape_type 非法：${shape.shape_type}`, node_id: shape.node_id });
     }
     if (shape.points.length === 0) {
-      errors.push(`${label} 缺少 points`);
+      issues.push({ message: `${label} 缺少 points`, node_id: shape.node_id });
     }
   });
 
   for (const id of duplicateIds) {
-    errors.push(`node_id 重复：${id}`);
+    issues.push({ message: `node_id 重复：${id}`, node_id: id });
   }
 
   for (const shape of shapes) {
     for (const edge of shape.edges) {
       if (!edge.target.trim()) {
-        errors.push(`${shape.node_id} 存在空的 edge.target`);
+        issues.push({ message: `${shape.node_id} 存在空的 edge.target`, node_id: shape.node_id });
       } else if (!ids.has(edge.target)) {
-        errors.push(`${shape.node_id} 指向不存在的 edge.target：${edge.target}`);
+        issues.push({
+          message: `${shape.node_id} 指向不存在的 edge.target：${edge.target}`,
+          node_id: shape.node_id,
+        });
       }
     }
   }
 
-  return { ok: errors.length === 0, errors };
+  return {
+    ok: issues.length === 0,
+    errors: issues.map((issue) => issue.message),
+    issues,
+  };
 }

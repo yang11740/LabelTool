@@ -11,21 +11,23 @@ export interface ImageInfo {
 }
 
 export interface LabelReadResponse {
-  version: string;
-  flags: Record<string, boolean>;
+  version?: string;
+  flags?: Record<string, boolean>;
   shapes: ShapeData[];
-  imagePath: string;
-  imageData: string | null;
+  imagePath?: string;
+  imageData?: string | null;
   imageHeight: number;
   imageWidth: number;
 }
 
 export interface LabelSaveRequest {
   shapes: ShapeData[];
-  imagePath: string;
   imageHeight: number;
   imageWidth: number;
-  flags: Record<string, boolean>;
+  version?: string;
+  flags?: Record<string, boolean>;
+  imagePath?: string;
+  imageData?: string | null;
 }
 
 // ── API helpers ──

@@ -14,12 +14,14 @@ describe("validateShapesForSave", () => {
     });
 
     const result = validateShapesForSave([valid, duplicate, emptyId, emptyPoints, badEdge]);
+    const text = result.errors.join("\n");
 
     expect(result.ok).toBe(false);
-    expect(result.errors.join("\n")).toContain("node_id 重复：n1");
-    expect(result.errors.join("\n")).toContain("缺少 node_id");
-    expect(result.errors.join("\n")).toContain("n3 缺少 points");
-    expect(result.errors.join("\n")).toContain("n4 指向不存在的 edge.target：missing");
+    expect(text).toContain("node_id 重复：n1");
+    expect(text).toContain("缺少 node_id");
+    expect(text).toContain("n3 缺少 points");
+    expect(text).toContain("n4 指向不存在的 edge.target：missing");
+    expect(result.issues.some((issue) => issue.node_id === "n4")).toBe(true);
   });
 
   it("accepts valid linked shapes", () => {
@@ -29,6 +31,6 @@ describe("validateShapesForSave", () => {
     });
     const n2 = createShapeData("point", [[5, 6]], { node_id: "n2" });
 
-    expect(validateShapesForSave([n1, n2])).toEqual({ ok: true, errors: [] });
+    expect(validateShapesForSave([n1, n2])).toEqual({ ok: true, errors: [], issues: [] });
   });
 });

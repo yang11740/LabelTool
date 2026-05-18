@@ -105,10 +105,8 @@ def write_label(image_path: str, payload: dict) -> Path:
     image = safe_resolve(image_path)
     lj = label_json_path(image)
 
-    payload.pop("imageData", None)
-
-    payload.setdefault("version", "6.1.0")
-    payload.setdefault("flags", {})
+    for key in ("flags", "version", "imagePath", "imageData"):
+        payload.pop(key, None)
     payload["shapes"] = [_flatten_shape_other_data(s) for s in payload.get("shapes", [])]
 
     with open(lj, "w", encoding="utf-8") as fh:
