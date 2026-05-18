@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 from pathlib import Path
@@ -106,14 +105,24 @@ def write_label(image_path: str, payload: dict) -> Path:
     image = safe_resolve(image_path)
     lj = label_json_path(image)
 
-    if not payload.get("imageData"):
-        img_bytes = image.read_bytes()
-        payload["imageData"] = base64.b64encode(img_bytes).decode("ascii")
+    payload.pop("imageData", None)
 
     payload.setdefault("version", "6.1.0")
     payload.setdefault("flags", {})
+    payload["shapes"] = [_flatten_shape_other_data(s) for s in payload.get("shapes", [])]
 
     with open(lj, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, ensure_ascii=False)
 
     return lj
+
+
+def _flatten_shape_other_data(shape: dict) -> dict:
+    """Write shape extension fields like desktop labelme JSON, not nested metadata."""
+    if not isinstance(shape, dict):
+        return shape
+    shape = dict(shape)
+    other_data = shape.pop("other_data", None)
+    if isinstance(other_data, dict):
+        shape = {**other_data, **shape}
+    return shape

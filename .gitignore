@@ -8,6 +8,8 @@
 /.cache/
 /.coverage
 /.pytest_cache/
+/.pytest-tmp/
+*.tsbuildinfo
 
 # OS / IDE
 .DS_Store

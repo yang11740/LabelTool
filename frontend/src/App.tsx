@@ -1,75 +1,100 @@
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Canvas from "./components/Canvas";
 import type { CanvasHandle, DrawMode } from "./components/Canvas";
+import DirBrowser from "./components/DirBrowser";
 import PropertyPanel from "./components/PropertyPanel";
 import ShapeList from "./components/ShapeList";
-import DirBrowser from "./components/DirBrowser";
-import { buildLabelmeJson, downloadJson, exportStageImage } from "./utils/export";
 import { saveLabel } from "./api";
 import { useToast } from "./context/ToastContext";
+import { buildLabelmeJson, downloadJson, exportStageImage } from "./utils/export";
+import {
+  createEmptyHistory,
+  pushHistory,
+  redoHistory,
+  undoHistory,
+  type HistoryState,
+} from "./utils/history";
+import {
+  saveLocalWorkspaceAnnotation,
+  type LoadedLocalWorkspaceImage,
+  type LocalWorkspaceImage,
+} from "./utils/localWorkspace";
+import { replaceShapeNodeId } from "./utils/shapeFactory";
+import { validateShapesForSave } from "./utils/validation";
 import type { ShapeData } from "./types/labelFile";
+
+type SaveStatus = "saved" | "dirty" | "saving" | "error";
+
+const TOOLS: { mode: DrawMode; label: string }[] = [
+  { mode: "select", label: "选择" },
+  { mode: "draw_rect", label: "矩形" },
+  { mode: "draw_polygon", label: "多边形" },
+  { mode: "draw_point", label: "点" },
+  { mode: "draw_line", label: "线段" },
+  { mode: "draw_circle", label: "圆" },
+  { mode: "draw_linestrip", label: "折线" },
+];
 
 export default function App() {
   const [shapes, setShapes] = useState<ShapeData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [mode, setMode] = useState<DrawMode>("draw_rect");
-
+  const [mode, setMode] = useState<DrawMode>("select");
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [imageFileName, setImageFileName] = useState<string>("image.jpg");
+  const [imageFileName, setImageFileName] = useState("image.jpg");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
-
   const [currentImagePath, setCurrentImagePath] = useState<string | null>(null);
+  const [currentLocalImage, setCurrentLocalImage] = useState<LocalWorkspaceImage | null>(null);
+  const [savedImage, setSavedImage] = useState<LocalWorkspaceImage | null>(null);
+  const [canvasKey, setCanvasKey] = useState("empty");
+  const [dirty, setDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [history, setHistory] = useState<HistoryState>(() => createEmptyHistory());
 
   const canvasRef = useRef<CanvasHandle>(null);
   const { toast } = useToast();
 
-  // ── API-based loading (DirBrowser) ──
+  const replaceShapes = useCallback((next: ShapeData[], isDirty = true) => {
+    setShapes(next);
+    setDirty(isDirty);
+    setSaveStatus(isDirty ? "dirty" : "saved");
+  }, []);
 
-  const handleDirLoad = useCallback(
-    (result: {
-      imageSrc: string;
-      imageFileName: string;
-      imageWidth: number;
-      imageHeight: number;
-      shapes: ShapeData[];
-      imagePath: string;
-    }) => {
-      setImageSrc(result.imageSrc);
-      setImageFileName(result.imageFileName);
-      setImageSize({ width: result.imageWidth, height: result.imageHeight });
-      setShapes(result.shapes);
-      setSelectedId(null);
-      setMode("select");
-      setCurrentImagePath(result.imagePath);
+  const commitShapes = useCallback(
+    (next: ShapeData[], historyBase = shapes) => {
+      setHistory((current) => pushHistory(current, historyBase));
+      replaceShapes(next, true);
     },
-    [],
+    [replaceShapes, shapes],
   );
 
-  const handleSelectShape = useCallback((id: string | null) => {
-    setSelectedId(id);
-    if (id) setMode("select");
+  const previewShapes = useCallback((next: ShapeData[]) => {
+    setShapes(next);
+    setDirty(true);
+    setSaveStatus("dirty");
   }, []);
 
-  const handleShapeUpdate = useCallback((updated: ShapeData) => {
-    setShapes((prev) =>
-      prev.map((s) => (s.node_id === updated.node_id ? updated : s)),
-    );
-  }, []);
+  const saveCurrentJson = useCallback(async (): Promise<boolean> => {
+    if (!imageSrc || !imageSize) return true;
 
-  // ── export / save ──
+    const validation = validateShapesForSave(shapes);
+    if (!validation.ok) {
+      setSaveStatus("error");
+      toast("error", `保存前校验失败：${validation.errors.slice(0, 3).join("；")}`);
+      return false;
+    }
 
-  const handleExportImage = useCallback(() => {
-    const stage = canvasRef.current?.getStage();
-    if (!stage) return;
-    const name = imageFileName.replace(/\.[^.]+$/, "") + "_visual.png";
-    exportStageImage(stage, name);
-  }, [imageFileName]);
-
-  const handleSaveJson = useCallback(async () => {
-    if (!imageSrc || !imageSize) return;
-
-    if (currentImagePath) {
-      try {
+    setSaveStatus("saving");
+    try {
+      if (currentLocalImage) {
+        const saved = await saveLocalWorkspaceAnnotation(
+          currentLocalImage,
+          shapes,
+          imageSize.width,
+          imageSize.height,
+        );
+        setCurrentLocalImage(saved);
+        setSavedImage(saved);
+      } else if (currentImagePath) {
         await saveLabel(currentImagePath, {
           shapes,
           imagePath: imageFileName,
@@ -77,141 +102,274 @@ export default function App() {
           imageWidth: imageSize.width,
           flags: {},
         });
-        toast("success", "已保存");
-      } catch (e) {
-        toast("error", `保存失败: ${(e as Error).message}`);
+      } else {
+        const json = buildLabelmeJson(shapes, imageFileName, imageSize.width, imageSize.height);
+        downloadJson(json, imageFileName.replace(/\.[^.]+$/, "") + ".json");
       }
-    } else {
-      const base64 = imageSrc.includes("base64,")
-        ? imageSrc.split("base64,")[1]
-        : imageSrc;
-      const json = buildLabelmeJson(
-        shapes,
-        base64,
-        imageFileName,
-        imageSize.width,
-        imageSize.height,
-      );
-      const name = imageFileName.replace(/\.[^.]+$/, "") + ".json";
-      downloadJson(json, name);
+
+      setDirty(false);
+      setSaveStatus("saved");
+      toast("success", "标注 JSON 已保存");
+      return true;
+    } catch (e) {
+      setSaveStatus("error");
+      toast("error", `保存失败：${(e as Error).message}`);
+      return false;
     }
-  }, [shapes, imageSrc, imageFileName, imageSize, currentImagePath, toast]);
+  }, [currentImagePath, currentLocalImage, imageFileName, imageSize, imageSrc, shapes, toast]);
 
-  // ── ──
+  const confirmBeforeImageChange = useCallback(async (): Promise<boolean> => {
+    if (!dirty) return true;
+    if (window.confirm("当前图片有未保存修改。是否先保存再切换？")) {
+      return saveCurrentJson();
+    }
+    if (window.confirm("是否放弃未保存修改并继续切换？")) {
+      setDirty(false);
+      setSaveStatus("saved");
+      return true;
+    }
+    return false;
+  }, [dirty, saveCurrentJson]);
 
-  const selectedShape = shapes.find((s) => s.node_id === selectedId) ?? null;
-  const allNodeIds = shapes.map((s) => s.node_id).filter(Boolean);
+  const handleLocalImageLoad = useCallback((result: LoadedLocalWorkspaceImage) => {
+    setImageSrc((previous) => {
+      if (previous?.startsWith("blob:") && previous !== result.imageSrc) {
+        URL.revokeObjectURL(previous);
+      }
+      return result.imageSrc;
+    });
+    setImageFileName(result.imageFileName);
+    setImageSize({ width: result.imageWidth, height: result.imageHeight });
+    setShapes(result.shapes);
+    setSelectedId(null);
+    setMode("select");
+    setCurrentImagePath(null);
+    setCurrentLocalImage(result.image);
+    setCanvasKey(`${result.imageFileName}:${result.imageSrc}`);
+    setHistory(createEmptyHistory());
+    setDirty(false);
+    setSaveStatus("saved");
+  }, []);
+
+  const handleShapeUpdate = useCallback(
+    (updated: ShapeData) => {
+      if (selectedId === null) return;
+      const next =
+        updated.node_id !== selectedId
+          ? replaceShapeNodeId(shapes, selectedId, updated)
+          : shapes.map((shape) => (shape.node_id === selectedId ? updated : shape));
+      commitShapes(next);
+      setSelectedId(updated.node_id);
+    },
+    [commitShapes, selectedId, shapes],
+  );
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedId === null) return;
+    commitShapes(
+      shapes
+        .filter((shape) => shape.node_id !== selectedId)
+        .map((shape) => ({
+          ...shape,
+          edges: shape.edges.filter((edge) => edge.target !== selectedId),
+        })),
+    );
+    setSelectedId(null);
+  }, [commitShapes, selectedId, shapes]);
+
+  const handleUndo = useCallback(() => {
+    const step = undoHistory(history, shapes);
+    if (!step.shapes) return;
+    setHistory(step.history);
+    setShapes(step.shapes);
+    setSelectedId(null);
+    setDirty(true);
+    setSaveStatus("dirty");
+  }, [history, shapes]);
+
+  const handleRedo = useCallback(() => {
+    const step = redoHistory(history, shapes);
+    if (!step.shapes) return;
+    setHistory(step.history);
+    setShapes(step.shapes);
+    setSelectedId(null);
+    setDirty(true);
+    setSaveStatus("dirty");
+  }, [history, shapes]);
+
+  const handleExportImage = useCallback(() => {
+    const stage = canvasRef.current?.getStage();
+    if (!stage) return;
+    exportStageImage(stage, imageFileName.replace(/\.[^.]+$/, "") + "_visual.png");
+  }, [imageFileName]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableElement(event.target)) return;
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === "s") {
+        event.preventDefault();
+        void saveCurrentJson();
+      } else if ((event.ctrlKey || event.metaKey) && key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) handleRedo();
+        else handleUndo();
+      } else if ((event.ctrlKey || event.metaKey) && key === "y") {
+        event.preventDefault();
+        handleRedo();
+      } else if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        if (!canvasRef.current?.deleteSelectedVertex()) {
+          handleDeleteSelected();
+        }
+      } else if (event.key === "Escape" && selectedId !== null) {
+        setSelectedId(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleDeleteSelected, handleRedo, handleUndo, saveCurrentJson, selectedId]);
+
+  const selectedShape = shapes.find((shape) => shape.node_id === selectedId) ?? null;
+  const allNodeIds = shapes.map((shape) => shape.node_id).filter(Boolean);
 
   return (
-    <div className="flex h-screen flex-col">
-      {/* toolbar */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b bg-white px-4 shadow-sm">
-        <h1 className="text-lg font-semibold text-gray-800">手稿识别标注工具</h1>
+    <div className="flex h-screen flex-col bg-stone-100 text-stone-900">
+      <header className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-stone-300 bg-[#f7f2e8] px-4 py-2 shadow-sm">
+        <div className="min-w-44">
+          <h1 className="text-lg font-semibold">古文手稿标注台</h1>
+          <p className="text-xs text-stone-500">Labelme Web - desktop schema aligned</p>
+        </div>
 
-        <div className="flex items-center gap-3">
-          <DirBrowser onLoad={handleDirLoad} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <DirBrowser
+            currentImageName={imageSrc ? imageFileName : null}
+            currentDirty={dirty}
+            savedImage={savedImage}
+            onBeforeImageChange={confirmBeforeImageChange}
+            onLoad={handleLocalImageLoad}
+          />
 
           {imageSrc && (
             <>
-              <span className="text-gray-300">|</span>
+              <span className="rounded border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-600">
+                {statusText(saveStatus)}
+              </span>
+              {TOOLS.map((tool) => (
+                <button
+                  key={tool.mode}
+                  onClick={() => setMode(tool.mode)}
+                  className={`rounded border px-3 py-1.5 text-sm font-medium ${
+                    mode === tool.mode
+                      ? "border-stone-900 bg-stone-900 text-white"
+                      : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+                  }`}
+                >
+                  {tool.label}
+                </button>
+              ))}
               <button
-                onClick={() => setMode("draw_rect")}
-                className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
-                  mode === "draw_rect"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
+                onClick={handleUndo}
+                className="rounded border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={history.undo.length === 0}
+                title="Ctrl/Cmd+Z"
               >
-                矩形
+                撤销
               </button>
               <button
-                onClick={() => setMode("draw_polygon")}
-                className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
-                  mode === "draw_polygon"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
+                onClick={handleRedo}
+                className="rounded border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={history.redo.length === 0}
+                title="Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y"
               >
-                多边形
+                重做
               </button>
               <button
-                onClick={() => setMode("select")}
-                className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
-                  mode === "select"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
+                onClick={handleDeleteSelected}
+                className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={selectedId === null}
+                title="Delete / Backspace"
               >
-                编辑
+                删除
               </button>
-              <span className="text-gray-300">|</span>
+              <button
+                onClick={() => canvasRef.current?.fitToScreen()}
+                className="rounded border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
+              >
+                适配
+              </button>
+              <button
+                onClick={() => canvasRef.current?.resetZoom()}
+                className="rounded border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
+              >
+                100%
+              </button>
               <button
                 onClick={handleExportImage}
-                className="rounded bg-green-600 px-3 py-1 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+                className="rounded border border-emerald-700 bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800"
               >
-                导出图片
+                导出视图
               </button>
               <button
-                onClick={handleSaveJson}
-                className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                onClick={() => void saveCurrentJson()}
+                className="rounded border border-amber-800 bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-50"
+                disabled={saveStatus === "saving"}
               >
                 保存 JSON
               </button>
             </>
           )}
         </div>
-
-        <span className="hidden text-xs text-gray-400 lg:block">
-          {mode === "draw_rect"
-            ? "拖拽绘制矩形 · 从左上角拖到右下角 · ESC 取消"
-            : mode === "draw_polygon"
-              ? "点击添加顶点 · Enter 闭合 · ESC 撤销上一点"
-              : "点击图形选中 · 拖拽顶点塑形 · ESC 取消选中"}
-        </span>
       </header>
 
-      {/* body: 3-column layout */}
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-52 shrink-0 overflow-hidden border-r bg-white">
-          <ShapeList
-            shapes={shapes}
-            selectedId={selectedId}
-            onSelectShape={handleSelectShape}
-          />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <aside className="w-56 shrink-0 overflow-hidden border-r border-stone-300 bg-[#fbf8f0]">
+          <ShapeList shapes={shapes} selectedId={selectedId} onSelectShape={setSelectedId} />
         </aside>
 
-        <main className="flex flex-1 items-start justify-center overflow-auto bg-gray-300 p-2">
+        <main className="flex flex-1 items-start justify-center overflow-hidden bg-[#d8d1c4] p-2">
           {imageSrc ? (
             <Canvas
+              key={canvasKey}
               ref={canvasRef}
               shapes={shapes}
               selectedId={selectedId}
               mode={mode}
               imageSrc={imageSrc}
               imageSize={imageSize}
-              onShapesChange={setShapes}
-              onSelectShape={handleSelectShape}
+              onShapesChange={(next, historyBase) => commitShapes(next, historyBase)}
+              onShapesPreview={previewShapes}
+              onSelectShape={setSelectedId}
               onModeChange={setMode}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center gap-3 self-center text-gray-500">
-              <p className="text-3xl">📷</p>
-              <p className="text-sm">输入本地图片目录路径，点击"扫描"开始标注</p>
-              <p className="text-xs text-gray-400">
-                支持 JPEG / PNG 格式 · 标签文件与图片同目录
+            <div className="flex max-w-md flex-col items-center justify-center gap-3 self-center rounded border border-dashed border-stone-400 bg-[#f7f2e8] p-8 text-center text-stone-600">
+              <p className="text-lg font-semibold text-stone-800">打开手稿图片文件夹</p>
+              <p className="text-sm">
+                点击右上角“打开文件夹”，选择包含手稿图片和同名 labelme JSON 的本地目录。
+                Web 端会读取新版桌面字段，并在保存时写回同名 JSON。
               </p>
             </div>
           )}
         </main>
 
-        <aside className="w-64 shrink-0 overflow-hidden border-l bg-white">
-          <PropertyPanel
-            shape={selectedShape}
-            allNodeIds={allNodeIds}
-            onShapeUpdate={handleShapeUpdate}
-          />
+        <aside className="w-80 shrink-0 overflow-hidden border-l border-stone-300 bg-stone-50">
+          <PropertyPanel shape={selectedShape} allNodeIds={allNodeIds} onShapeUpdate={handleShapeUpdate} />
         </aside>
       </div>
     </div>
   );
+}
+
+function statusText(status: SaveStatus): string {
+  if (status === "saving") return "保存中";
+  if (status === "dirty") return "未保存";
+  if (status === "error") return "需要处理";
+  return "已保存";
+}
+
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
