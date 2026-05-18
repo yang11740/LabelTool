@@ -108,7 +108,7 @@ class LabelDialog(QtWidgets.QDialog):
             # 换成我们的box版本
             self.edit.currentTextChanged.connect(self._on_text_changed)
         self.edit_group_id = QtWidgets.QLineEdit()
-        self.edit_group_id.setPlaceholderText("Group ID(划分句子用)")
+        self.edit_group_id.setPlaceholderText("输入数字，如: 1")
         self.edit_group_id.setValidator(
             QtGui.QRegExpValidator(QtCore.QRegExp(r"\d*"), None)
         )
@@ -212,13 +212,15 @@ class LabelDialog(QtWidgets.QDialog):
         self.btn_add_edge.clicked.connect(lambda: self._add_edge_row())
         layout_edge_header.addWidget(self.btn_add_edge)
         layout.addLayout(layout_edge_header)
-        # 创建一个 2 列的表格
-        self.edges_table = QtWidgets.QTableWidget(0, 2)
+        # 创建一个 3 列的表格(第3列为删除按钮)
+        self.edges_table = QtWidgets.QTableWidget(0, 3)
         self.edges_table.setHorizontalHeaderLabels(
-            ["目标 Node ID", "关系类型(Relation)"]
+            ["目标 Node ID", "关系类型(Relation)", "操作"]
         )
         self.edges_table.horizontalHeader().setStretchLastSection(True)
-        self.edges_table.setFixedHeight(100)
+        self.edges_table.setColumnWidth(0, 130)
+        self.edges_table.setColumnWidth(1, 160)
+        self.edges_table.setFixedHeight(120)
         layout.addWidget(self.edges_table)
 
         # label_list 候选列表
@@ -307,6 +309,19 @@ class LabelDialog(QtWidgets.QDialog):
         if relation:
             combo.setCurrentText(relation)
         self.edges_table.setCellWidget(row, 1, combo)
+
+        # 删除按钮
+        btn_delete = QtWidgets.QPushButton("删除")
+        btn_delete.clicked.connect(
+            lambda checked=None, b=btn_delete: self._delete_edge_row(b)
+        )
+        self.edges_table.setCellWidget(row, 2, btn_delete)
+
+    def _delete_edge_row(self, button):
+        for row in range(self.edges_table.rowCount()):
+            if self.edges_table.cellWidget(row, 2) is button:
+                self.edges_table.removeRow(row)
+                return
 
     def _clear_edges_table(self):
         self.edges_table.setRowCount(0)

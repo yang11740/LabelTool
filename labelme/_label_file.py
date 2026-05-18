@@ -211,6 +211,7 @@ class LabelFile:
         self.image_path: str | None = None
         self.image_data: bytes | None = None
         self.other_data: dict[str, Any] = {}
+        self.flags: dict[str, bool] = {}
         if filename is not None:
             self.load(filename)
         self.filename: str | None = filename
@@ -312,16 +313,25 @@ class LabelFile:
             with open(filename, encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Normalize Windows-style backslash paths to POSIX forward slashes
-            image_path = PureWindowsPath(data["imagePath"]).as_posix()
+            # 新格式不再写入 imagePath；从 JSON 文件名推断对应图片
+            if "imagePath" in data:
+                image_path = PureWindowsPath(data["imagePath"]).as_posix()
+                image_file = str(Path(filename).parent / image_path)
+                if not Path(image_file).exists():
+                    image_file = self._find_image_for_label(filename)
+                    image_path = PureWindowsPath(
+                        Path(image_file).name
+                    ).as_posix()
+            else:
+                image_file = self._find_image_for_label(filename)
+                image_path = PureWindowsPath(
+                    Path(image_file).name
+                ).as_posix()
 
-            if data["imageData"] is not None:
+            if data.get("imageData") is not None:
                 image_data = base64.b64decode(data["imageData"])
             else:
-                # relative path from label file to relative path from cwd
-                image_data = self.load_image_file(
-                    str(Path(filename).parent / image_path)
-                )
+                image_data = self.load_image_file(image_file)
             flags = data.get("flags") or {}
             self._check_image_height_and_width(
                 image_data,
@@ -331,6 +341,8 @@ class LabelFile:
             shapes: list[ShapeDict] = [
                 _load_shape_json_obj(shape_json_obj=s) for s in data["shapes"]
             ]
+        except LabelFileError:
+            raise
         except Exception as e:
             raise LabelFileError(e)
 
@@ -346,6 +358,19 @@ class LabelFile:
         self.image_data = image_data
         self.filename = filename
         self.other_data = other_data
+
+    @staticmethod
+    def _find_image_for_label(label_path: str) -> str:
+        """根据 JSON 标注文件名查找对应的图片文件。"""
+        parent = Path(label_path).parent
+        stem = Path(label_path).stem
+        for ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".gif"):
+            candidate = parent / f"{stem}{ext}"
+            if candidate.exists():
+                return str(candidate)
+        raise LabelFileError(
+            f"Cannot find image file for label: {label_path}"
+        )
 
     @staticmethod
     def _check_image_height_and_width(
@@ -378,23 +403,16 @@ class LabelFile:
         other_data: dict[str, Any] | None = None,
         flags: dict[str, bool] | None = None,
     ) -> None:
-        image_data_b64: str | None = None
         if image_data is not None:
             image_height, image_width = self._check_image_height_and_width(
                 image_data, image_height, image_width
             )
-            image_data_b64 = base64.b64encode(image_data).decode("utf-8")
         if other_data is None:
             other_data = {}
-        if flags is None:
-            flags = {}
-        # JSON keys stay camelCase — on-disk format, breaks existing .json files.
-        data = {
-            "version": __version__,
-            "flags": flags,
+        # 精简 JSON 格式：version/flags/imagePath/imageData 不再写入文件
+        # — 从文件名即可推断对应图片；imageHeight/imageWidth 用于画布初始化
+        data: dict[str, Any] = {
             "shapes": shapes,
-            "imagePath": image_path,
-            "imageData": image_data_b64,
             "imageHeight": image_height,
             "imageWidth": image_width,
         }
