@@ -39,8 +39,25 @@ dependencies = [
 ]
 dynamic = ["readme", "version"]
 
-[tool.uv]
-constraint-dependencies = ["onnxruntime<1.24; python_version < '3.11'"]
+[project.optional-dependencies]
+dev = [
+  "ipython",
+  "mdformat-frontmatter>=2.0.10",
+  "mdformat>=0.7",
+  "pyqt5-stubs>=5.15.6.0",
+  "pytest>=8.3.4",
+  "pytest-cov>=7.1.0",
+  "pytest-qt>=4.4.0",
+  "pytest-xdist>=3.8.0",
+  "ruff~=0.12.11",
+  "taplo>=0.9.3",
+  "twine>=6.1.0",
+  "ty>=0.0.31",
+  "types-pillow>=10.2.0.20240822",
+  "types-pyyaml>=6.0.12.20241230",
+  "typos>=1.45.0",
+  "yamlfix>=1.19.1",
+]
 
 [tool.hatch.metadata.hooks.fancy-pypi-readme]
 content-type = "text/markdown"
@@ -94,3 +111,6 @@ force-single-line = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+
+[tool.setuptools]
+packages = ["app"]

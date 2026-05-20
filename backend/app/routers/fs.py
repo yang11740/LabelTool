@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ..models.shape import ShapeModel
 from ..services import fs
 
 router = APIRouter(prefix="/api")
@@ -34,7 +33,7 @@ class WorkspaceResponse(BaseModel):
 class LabelReadResponse(BaseModel):
     version: str = "6.1.0"
     flags: dict = Field(default_factory=dict)
-    shapes: list[ShapeModel] = Field(default_factory=list)
+    shapes: list[dict] = Field(default_factory=list)
     imagePath: str = ""
     imageData: str | None = None
     imageHeight: int = 0
@@ -42,7 +41,7 @@ class LabelReadResponse(BaseModel):
 
 
 class LabelSaveRequest(BaseModel):
-    shapes: list[ShapeModel] = Field(default_factory=list)
+    shapes: list[dict] = Field(default_factory=list)
     imagePath: str = ""
     imageHeight: int = 0
     imageWidth: int = 0

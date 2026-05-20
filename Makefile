@@ -8,15 +8,16 @@ endif
 PYTEST_ARGS ?= --numprocesses=auto
 
 define exec
-	@uv run --no-sync python -c "print('\033[1;36m$(1)\033[0m')"
+	@python -c "print('\033[1;36m$(1)\033[0m')"
 	@$(1)
 endef
 
 help:
-	@uv run --no-sync python -c "import re; lines=open('Makefile').read().splitlines(); print('\033[1;32mAvailable targets:\033[0m'); [print(f'  \033[1;36m{m.group(1):<20s}\033[0m {m.group(2)}') for l in lines if (m:=re.match(r'^([a-zA-Z_-]+):.*?# (.+)$$',l))]"
+	@python -c "import re; lines=open('Makefile').read().splitlines(); print('\033[1;32mAvailable targets:\033[0m'); [print(f'  \033[1;36m{m.group(1):<20s}\033[0m {m.group(2)}') for l in lines if (m:=re.match(r'^([a-zA-Z_-]+):.*?# (.+)$$',l))]"
 
 setup:  # Setup the development environment
-	$(call exec,uv sync)
+	$(call exec,pip install -e ".[dev]")
+	$(call exec,pip install -e "backend/[dev]")
 
 lint: update_translate  # Lint code
 	$(call exec,ruff format --check)
@@ -43,7 +44,7 @@ test:  # Run tests
 	$(call exec,pytest -v tests/ $(PYTEST_ARGS))
 
 update_translate:
-	$(call exec,tools/update_translate.py)
+	$(call exec,python tools/update_translate.py)
 
 coverage:  # Run tests with coverage
 	$(call exec,pytest -v tests/ --numprocesses=auto --cov=labelme --cov-report=term-missing)

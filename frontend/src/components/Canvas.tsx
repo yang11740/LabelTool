@@ -45,6 +45,7 @@ interface CanvasProps {
   onShapesPreview: (shapes: ShapeData[]) => void;
   onSelectShape: (id: string | null) => void;
   onModeChange: (mode: DrawMode) => void;
+  readOnly?: boolean;
 }
 
 const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
@@ -58,6 +59,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     onShapesPreview,
     onSelectShape,
     onModeChange,
+    readOnly = false,
   },
   ref,
 ) {
@@ -96,6 +98,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   }, [fitScale]);
 
   const deleteSelectedVertex = useCallback(() => {
+    if (readOnly) return false;
     if (!selectedVertex) return false;
     const target = shapes.find((shape) => shape.node_id === selectedVertex.nodeId);
     if (!target || target.points.length <= minPointsForShape(target.shape_type)) return false;
@@ -109,7 +112,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     onShapesChange(next);
     setSelectedVertex(null);
     return true;
-  }, [onShapesChange, selectedVertex, shapes]);
+  }, [onShapesChange, readOnly, selectedVertex, shapes]);
 
   useImperativeHandle(ref, () => ({
     getStage: () => stageRef.current,
@@ -142,13 +145,14 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
 
   const addShape = useCallback(
     (shapeType: ShapeType, points: [number, number][]) => {
+      if (readOnly) return;
       if (!isMeaningfulShape(shapeType, points)) return;
       const newShape = createShapeData(shapeType, points, { node_id: nextNodeId(shapes) });
       onShapesChange([...shapes, newShape]);
       onSelectShape(newShape.node_id);
       onModeChange("select");
     },
-    [onModeChange, onSelectShape, onShapesChange, shapes],
+    [onModeChange, onSelectShape, onShapesChange, readOnly, shapes],
   );
 
   const stagePoint = (e: KonvaEventObject<MouseEvent>): Point | null => {
@@ -160,7 +164,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
 
   const handleStageMouseDown = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
-      if (mode === "select") return;
+      if (readOnly || mode === "select") return;
       if (e.target !== e.target.getStage() && e.target.name() !== "bg_rect") return;
       const pos = stagePoint(e);
       if (!pos) return;
@@ -178,12 +182,12 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         setDragOrigin(pos);
       }
     },
-    [addShape, freehandPoints, mode, scale],
+    [addShape, freehandPoints, mode, readOnly, scale],
   );
 
   const handleStageMouseUp = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
-      if (!dragOrigin) return;
+      if (readOnly || !dragOrigin) return;
       const pos = stagePoint(e);
       if (!pos) return;
 
@@ -202,7 +206,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       }
       setDragOrigin(null);
     },
-    [addShape, dragOrigin, mode],
+    [addShape, dragOrigin, mode, readOnly],
   );
 
   const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
@@ -253,6 +257,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       const pos = stagePoint(e);
       if (!pos) return;
       if (!dragBaseRef.current) dragBaseRef.current = cloneShapes(shapes);
+      if (readOnly) return;
       onShapesPreview(
         shapes.map((s) => {
           if (s.node_id !== nodeId) return s;
@@ -265,28 +270,30 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         }),
       );
     },
-    [onShapesPreview, shapes],
+    [onShapesPreview, readOnly, shapes],
   );
 
   const handleVertexDragEnd = useCallback(() => {
-    if (dragBaseRef.current) {
+    if (!readOnly && dragBaseRef.current) {
       onShapesChange(shapes, dragBaseRef.current);
       dragBaseRef.current = null;
     }
-  }, [onShapesChange, shapes]);
+  }, [onShapesChange, readOnly, shapes]);
 
   const handleShapeDragStart = useCallback(
     (nodeId: string, e: KonvaEventObject<DragEvent>) => {
       const pos = stagePoint(e as unknown as KonvaEventObject<MouseEvent>);
+      if (readOnly) return;
       if (!pos) return;
       shapeDragRef.current = { nodeId, start: pos, base: cloneShapes(shapes) };
     },
-    [shapes],
+    [readOnly, shapes],
   );
 
   const handleShapeDragMove = useCallback(
     (nodeId: string, e: KonvaEventObject<DragEvent>) => {
       const drag = shapeDragRef.current;
+      if (readOnly) return;
       const pos = stagePoint(e as unknown as KonvaEventObject<MouseEvent>);
       if (!drag || drag.nodeId !== nodeId || !pos) return;
       const dx = pos.x - drag.start.x;
@@ -298,22 +305,24 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         e.target.position({ x: 0, y: 0 });
       }
     },
-    [onShapesPreview],
+    [onShapesPreview, readOnly],
   );
 
   const handleShapeDragEnd = useCallback(
     (nodeId: string) => {
       const drag = shapeDragRef.current;
+      if (readOnly) return;
       if (!drag || drag.nodeId !== nodeId) return;
       onShapesChange(shapes, drag.base);
       shapeDragRef.current = null;
     },
-    [onShapesChange, shapes],
+    [onShapesChange, readOnly, shapes],
   );
 
   const handleInsertPoint = useCallback(
     (nodeId: string, point: Point) => {
       const target = shapes.find((shape) => shape.node_id === nodeId);
+      if (readOnly) return;
       if (!target || (target.shape_type !== "polygon" && target.shape_type !== "linestrip")) return;
       const insertAt = nearestSegmentIndex(target.points, [point.x, point.y], target.shape_type === "polygon");
       const next = shapes.map((shape) =>
@@ -331,7 +340,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       onShapesChange(next);
       setSelectedVertex({ nodeId, index: insertAt + 1 });
     },
-    [onShapesChange, shapes],
+    [onShapesChange, readOnly, shapes],
   );
 
   const handleMouseDownCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -464,6 +473,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
               onVertexSelect={(index) => setSelectedVertex({ nodeId: shape.node_id, index })}
               selectedVertexIndex={selectedVertex?.nodeId === shape.node_id ? selectedVertex.index : null}
               onInsertPoint={(point) => handleInsertPoint(shape.node_id, point)}
+              readOnly={readOnly}
             />
           ))}
         </Layer>
@@ -574,6 +584,7 @@ function ShapeRenderer({
   onVertexSelect,
   selectedVertexIndex,
   onInsertPoint,
+  readOnly,
 }: {
   shape: ShapeData;
   scale: number;
@@ -591,6 +602,7 @@ function ShapeRenderer({
   onVertexSelect: (index: number) => void;
   selectedVertexIndex: number | null;
   onInsertPoint: (point: Point) => void;
+  readOnly: boolean;
 }) {
   if (shape.points.length === 0) return null;
   const sw = STROKE_WIDTH / scale;
@@ -610,7 +622,7 @@ function ShapeRenderer({
         onSelect={onSelect}
         onHover={onHover}
         hoverEnabled={hoverEnabled}
-        draggable={isSelected}
+        draggable={isSelected && !readOnly}
         onDragStart={(e) => onShapeDragStart(shape.node_id, e)}
         onDragMove={(e) => onShapeDragMove(shape.node_id, e)}
         onDragEnd={() => onShapeDragEnd(shape.node_id)}
@@ -624,7 +636,7 @@ function ShapeRenderer({
         fontSize={fs}
         color={color}
       />
-      {isSelected &&
+      {isSelected && !readOnly &&
         shape.points.map((p, i) => (
           <Circle
             key={i}
