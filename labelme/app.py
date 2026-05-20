@@ -2767,7 +2767,7 @@ def _shape_to_dict(shape: Shape) -> dict[str, Any]:
         "shape_type": shape.shape_type,
         "transcription_raw": shape.transcription_raw,
         "transcription_semantic": shape.transcription_semantic,
-        "points": [(p.x(), p.y()) for p in shape.points],
+        "points": [(round(p.x(), 2), round(p.y(), 2)) for p in shape.points],
         "attributes": shape.attributes,
         "edges": shape.edges,
     }
