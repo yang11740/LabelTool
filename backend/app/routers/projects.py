@@ -10,6 +10,7 @@ from ..db import get_db
 from ..dependencies import get_current_user, require_roles
 from ..models.collab import Project
 from ..models.collab import User
+from ..services.storage import StorageService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -49,3 +50,23 @@ def create_project(
         raise HTTPException(409, "Project name already exists")
     db.refresh(project)
     return ProjectResponse(id=project.id, name=project.name, description=project.description or "")
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_roles("admin")),
+) -> None:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    storage = StorageService()
+    for dataset in project.datasets:
+        for image in dataset.images:
+            try:
+                storage.delete(image.storage_path)
+            except Exception:
+                pass
+    db.delete(project)
+    db.commit()

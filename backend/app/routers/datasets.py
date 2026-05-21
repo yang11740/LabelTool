@@ -187,6 +187,25 @@ def import_folder(
     return ImportFolderResponse(imported=imported, skipped=skipped, total_images=int(total))
 
 
+@router.delete("/datasets/{dataset_id}", status_code=204)
+def delete_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_roles("admin")),
+) -> None:
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(404, "Dataset not found")
+    storage = StorageService()
+    for image in dataset.images:
+        try:
+            storage.delete(image.storage_path)
+        except Exception:
+            pass
+    db.delete(dataset)
+    db.commit()
+
+
 def _dataset_response(dataset: Dataset) -> DatasetResponse:
     return DatasetResponse(
         id=dataset.id,

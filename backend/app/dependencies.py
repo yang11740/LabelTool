@@ -38,7 +38,7 @@ def get_current_user(
 def require_roles(*roles: str) -> Callable[[User], User]:
     def dependency(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
-            raise HTTPException(403, "Permission denied")
+            raise HTTPException(403, f"Role required: {', '.join(roles)}")
         return user
 
     return dependency

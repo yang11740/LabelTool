@@ -59,6 +59,11 @@ class StorageService:
             raise FileNotFoundError(storage_path)
         return path
 
+    def delete(self, storage_path: str) -> None:
+        path = Path(storage_path)
+        if path.exists():
+            path.unlink()
+
 
 def is_image_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS

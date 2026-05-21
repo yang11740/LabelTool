@@ -6,21 +6,40 @@ import PropertyPanel from "./components/PropertyPanel";
 import ShapeList from "./components/ShapeList";
 import { saveLabel } from "./api";
 import {
+  assignTask,
+  bulkAssignTasks,
+  canAssignTask,
   canEditTask,
-  claimTask,
+  canRejectTask,
+  canReleaseTask,
+  canReviewTask,
+  canStartTask,
+  canSubmitTask,
   collabImageUrl,
   createDataset,
   createProject,
   createUser,
+  deleteDataset,
+  deleteProject,
+  friendlyApiError,
   getMe,
   getStoredToken,
-  login,
   listDatasets,
   listProjects,
   listTasks,
+  listUsers,
+  login,
+  logout,
   readTaskAnnotation,
+  rejectTask,
+  releaseTask,
+  reviewTask,
   saveTaskAnnotation,
+  setStoredToken,
+  startTask,
   submitTask,
+  taskActionLabel,
+  taskStatusLabel,
   uploadImages,
   type CollabUser,
   type Dataset,
@@ -61,8 +80,9 @@ const TOOLS: { mode: DrawMode; label: string }[] = [
 ];
 
 export default function App() {
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("local");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("collab");
   const [user, setUser] = useState<CollabUser | null>(null);
+  const [users, setUsers] = useState<CollabUser[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -106,6 +126,19 @@ export default function App() {
     setSaveStatus("saved");
   }, []);
 
+  const resetCollabState = useCallback(() => {
+    setUsers([]);
+    setProjects([]);
+    setDatasets([]);
+    setTasks([]);
+    setSelectedProject(null);
+    setSelectedDataset(null);
+    setUploadSummary(null);
+    setTaskStatusFilter("");
+    setTaskAssigneeFilter("");
+    resetEditor();
+  }, [resetEditor]);
+
   const replaceShapes = useCallback((next: ShapeData[], isDirty = true) => {
     setShapes(next);
     setDirty(isDirty);
@@ -121,65 +154,91 @@ export default function App() {
     [readOnly, replaceShapes, shapes],
   );
 
-  const previewShapes = useCallback((next: ShapeData[]) => {
-    if (readOnly) return;
-    setShapes(next);
-    setDirty(true);
-    setSaveStatus("dirty");
-  }, [readOnly]);
+  const previewShapes = useCallback(
+    (next: ShapeData[]) => {
+      if (readOnly) return;
+      setShapes(next);
+      setDirty(true);
+      setSaveStatus("dirty");
+    },
+    [readOnly],
+  );
 
   const refreshProjects = useCallback(async () => {
     setProjects(await listProjects());
   }, []);
 
+  const refreshUsers = useCallback(async (currentUser = user) => {
+    if (currentUser?.role === "admin") setUsers(await listUsers());
+    else setUsers([]);
+  }, [user]);
+
   const refreshDatasets = useCallback(async (project: Project) => {
     setDatasets(await listDatasets(project.id));
   }, []);
 
-  const refreshTasks = useCallback(async (dataset: Dataset) => {
-    setTasks(await listTasks(dataset.id));
-  }, []);
+  const refreshTasks = useCallback(
+    async (dataset: Dataset, status = taskStatusFilter, assignee = taskAssigneeFilter) => {
+      setTasks(await listTasks(dataset.id, status, assignee));
+    },
+    [taskAssigneeFilter, taskStatusFilter],
+  );
 
   useEffect(() => {
-    if (workspaceMode === "collab" && user) void refreshProjects();
-  }, [refreshProjects, user, workspaceMode]);
+    if (workspaceMode !== "collab" || !user) return;
+    void refreshProjects();
+    void refreshUsers(user);
+  }, [refreshProjects, refreshUsers, user, workspaceMode]);
 
   useEffect(() => {
     if (!getStoredToken()) return;
     getMe()
-      .then(setUser)
-      .catch(() => undefined);
+      .then((restored) => {
+        setUser(restored);
+        setWorkspaceMode("collab");
+      })
+      .catch(() => {
+        setStoredToken("");
+        setUser(null);
+      });
   }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await logout();
+    } catch {
+      setStoredToken("");
+    }
+    setUser(null);
+    resetCollabState();
+    setWorkspaceMode("collab");
+    toast("success", "已退出登录");
+  }, [resetCollabState, toast]);
 
   const saveCurrentJson = useCallback(async (): Promise<boolean> => {
     if (!imageSrc || !imageSize) return true;
     if (readOnly) {
-      toast("error", "当前任务未由你锁定，不能保存");
+      toast("error", "当前为只读查看。请先点击“开始标注”锁定任务后再保存。");
       return false;
     }
 
     const validation = validateShapesForSave(shapes);
     if (!validation.ok) {
       setSaveStatus("error");
-      toast("error", `保存前校验失败：${validation.errors.slice(0, 3).join("；")}`);
+      toast("error", `保存校验失败：${validation.errors.slice(0, 3).join("；")}`);
       return false;
     }
 
     setSaveStatus("saving");
     try {
-      if (workspaceMode === "collab" && currentTask && user) {
+      if (workspaceMode === "collab" && currentTask) {
         await saveTaskAnnotation(currentTask.id, {
           shapes,
           imageHeight: imageSize.height,
           imageWidth: imageSize.width,
         });
       } else if (currentLocalImage) {
-        const saved = await saveLocalWorkspaceAnnotation(
-          currentLocalImage,
-          shapes,
-          imageSize.width,
-          imageSize.height,
-        );
+        const saved = await saveLocalWorkspaceAnnotation(currentLocalImage, shapes, imageSize.width, imageSize.height);
         setCurrentLocalImage(saved);
         setSavedImage(saved);
       } else if (currentImagePath) {
@@ -199,15 +258,15 @@ export default function App() {
       return true;
     } catch (e) {
       setSaveStatus("error");
-      toast("error", `保存失败：${(e as Error).message}`);
+      toast("error", friendlyApiError(e));
       return false;
     }
-  }, [currentImagePath, currentLocalImage, currentTask, imageFileName, imageSize, imageSrc, readOnly, shapes, toast, user, workspaceMode]);
+  }, [currentImagePath, currentLocalImage, currentTask, imageFileName, imageSize, imageSrc, readOnly, shapes, toast, workspaceMode]);
 
   const confirmBeforeImageChange = useCallback(async (): Promise<boolean> => {
     if (!dirty) return true;
-    if (window.confirm("当前标注有未保存修改，是否保存后继续？")) return saveCurrentJson();
-    if (window.confirm("是否放弃当前未保存修改？")) {
+    if (window.confirm("当前图片有未保存修改，是否先保存再切换？")) return saveCurrentJson();
+    if (window.confirm("是否放弃未保存修改并继续切换？")) {
       setDirty(false);
       setSaveStatus("saved");
       return true;
@@ -235,45 +294,124 @@ export default function App() {
     setSaveStatus("saved");
   }, []);
 
-  const openTask = useCallback(async (task: TaskItem) => {
-    if (!(await confirmBeforeImageChange())) return;
-    const annotation = await readTaskAnnotation(task.id);
-    setWorkspaceMode("collab");
-    setCurrentTask(task);
-    setCurrentLocalImage(null);
-    setCurrentImagePath(null);
-    setImageSrc(collabImageUrl(task.image_id));
-    setImageFileName(task.image_name);
-    setImageSize({ width: annotation.imageWidth || task.image_width, height: annotation.imageHeight || task.image_height });
-    setShapes(annotation.shapes);
-    setSelectedId(null);
-    setMode("select");
-    setCanvasKey(`task:${task.id}:${annotation.version_index}`);
-    setHistory(createEmptyHistory());
-    setDirty(false);
-    setSaveStatus("saved");
-  }, [confirmBeforeImageChange]);
+  const openTask = useCallback(
+    async (task: TaskItem) => {
+      if (!(await confirmBeforeImageChange())) return;
+      try {
+        const annotation = await readTaskAnnotation(task.id);
+        setWorkspaceMode("collab");
+        setCurrentTask(task);
+        setCurrentLocalImage(null);
+        setCurrentImagePath(null);
+        setImageSrc(collabImageUrl(task.image_id));
+        setImageFileName(task.image_name);
+        setImageSize({ width: annotation.imageWidth || task.image_width, height: annotation.imageHeight || task.image_height });
+        setShapes(annotation.shapes);
+        setSelectedId(null);
+        setMode("select");
+        setCanvasKey(`task:${task.id}:${annotation.version_index}:${task.locked_by ?? "readonly"}`);
+        setHistory(createEmptyHistory());
+        setDirty(false);
+        setSaveStatus("saved");
+      } catch (e) {
+        toast("error", friendlyApiError(e));
+      }
+    },
+    [confirmBeforeImageChange, toast],
+  );
 
-  const handleClaimTask = useCallback(async (task: TaskItem) => {
-    if (!user) return;
-    try {
-      const claimed = await claimTask(task.id);
-      setTasks((current) => current.map((item) => (item.id === claimed.id ? claimed : item)));
-      await openTask(claimed);
-    } catch (e) {
-      toast("error", `领取失败：${(e as Error).message}`);
+  const handleStartTask = useCallback(
+    async (task: TaskItem) => {
+      if (!user || !canStartTask(task, user)) {
+        await openTask(task);
+        return;
+      }
+      try {
+        const started = await startTask(task.id);
+        setTasks((current) => current.map((item) => (item.id === started.id ? started : item)));
+        await openTask(started);
+      } catch (e) {
+        toast("error", friendlyApiError(e));
+      }
+    },
+    [openTask, toast, user],
+  );
+
+  const handleReleaseTask = useCallback(async () => {
+    if (!currentTask || !user || !canReleaseTask(currentTask, user)) return;
+    if (dirty) {
+      const saved = await saveCurrentJson();
+      if (!saved) return;
     }
-  }, [openTask, toast, user]);
+    try {
+      const released = await releaseTask(currentTask.id);
+      setCurrentTask(released);
+      setTasks((current) => current.map((item) => (item.id === released.id ? released : item)));
+      setCanvasKey(`task:${released.id}:${released.locked_by ?? "readonly"}`);
+      setMode("select");
+      toast("success", "已解锁，当前任务回到只读查看");
+    } catch (e) {
+      toast("error", friendlyApiError(e));
+    }
+  }, [currentTask, dirty, saveCurrentJson, toast, user]);
+
+  const handleAssignTasks = useCallback(
+    async (taskIds: number[], assigneeId: number | null) => {
+      if (!selectedDataset || taskIds.length === 0) return;
+      try {
+        const updated = taskIds.length === 1
+          ? [await assignTask(taskIds[0], assigneeId)]
+          : await bulkAssignTasks(taskIds, assigneeId);
+        const byId = new Map(updated.map((task) => [task.id, task]));
+        setTasks((current) => current.map((task) => byId.get(task.id) ?? task));
+        setCurrentTask((current) => current ? byId.get(current.id) ?? current : current);
+        await refreshTasks(selectedDataset);
+        toast("success", assigneeId === null ? "已取消分配" : `已分配 ${updated.length} 个任务`);
+      } catch (e) {
+        toast("error", friendlyApiError(e));
+      }
+    },
+    [refreshTasks, selectedDataset, toast],
+  );
 
   const handleSubmitTask = useCallback(async () => {
-    if (!currentTask || !user) return;
+    if (!currentTask || !user || !canSubmitTask(currentTask, user)) return;
     const saved = await saveCurrentJson();
     if (!saved) return;
-    const submitted = await submitTask(currentTask.id);
-    setCurrentTask(submitted);
-    setTasks((current) => current.map((item) => (item.id === submitted.id ? submitted : item)));
-    toast("success", "任务已提交");
+    try {
+      const submitted = await submitTask(currentTask.id);
+      setCurrentTask(submitted);
+      setTasks((current) => current.map((item) => (item.id === submitted.id ? submitted : item)));
+      setCanvasKey(`task:${submitted.id}:${submitted.locked_by ?? "readonly"}`);
+      toast("success", "任务已提交");
+    } catch (e) {
+      toast("error", friendlyApiError(e));
+    }
   }, [currentTask, saveCurrentJson, toast, user]);
+
+  const handleReviewTask = useCallback(async () => {
+    if (!currentTask || !user || !canReviewTask(currentTask, user)) return;
+    try {
+      const reviewed = await reviewTask(currentTask.id);
+      setCurrentTask(reviewed);
+      setTasks((current) => current.map((item) => (item.id === reviewed.id ? reviewed : item)));
+      toast("success", "任务已审核通过");
+    } catch (e) {
+      toast("error", friendlyApiError(e));
+    }
+  }, [currentTask, toast, user]);
+
+  const handleRejectTask = useCallback(async () => {
+    if (!currentTask || !user || !canRejectTask(currentTask, user)) return;
+    try {
+      const rejected = await rejectTask(currentTask.id);
+      setCurrentTask(rejected);
+      setTasks((current) => current.map((item) => (item.id === rejected.id ? rejected : item)));
+      toast("success", "任务已打回");
+    } catch (e) {
+      toast("error", friendlyApiError(e));
+    }
+  }, [currentTask, toast, user]);
 
   const handleShapeUpdate = useCallback(
     (updated: ShapeData) => {
@@ -362,7 +500,7 @@ export default function App() {
       <header className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-stone-300 bg-[#f7f2e8] px-4 py-2 shadow-sm">
         <div className="min-w-48">
           <h1 className="text-lg font-semibold">古文手稿协作标注台</h1>
-          <p className="text-xs text-stone-500">Labelme Web-v3 collaboration preview</p>
+          <p className="text-xs text-stone-500">Labelme Web-v3 collaboration</p>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -395,11 +533,32 @@ export default function App() {
             />
           )}
 
+          {user && workspaceMode === "collab" && (
+            <span className="rounded border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-700">
+              {user.username} / {user.role}
+            </span>
+          )}
+          {user && workspaceMode === "collab" && (
+            <button onClick={() => void handleLogout()} className={plainButton()}>
+              退出登录
+            </button>
+          )}
+
           {imageSrc && (
             <>
               <span className="rounded border border-stone-300 bg-white px-2 py-1.5 text-xs text-stone-600">
-                {readOnly ? "只读" : statusText(saveStatus)}
+                {readOnly ? "只读查看" : statusText(saveStatus)}
               </span>
+              {workspaceMode === "collab" && currentTask && user?.role === "annotator" && canStartTask(currentTask, user) && (
+                <button onClick={() => void handleStartTask(currentTask)} className={primaryButton()}>
+                  锁定编辑
+                </button>
+              )}
+              {workspaceMode === "collab" && currentTask && canReleaseTask(currentTask, user) && (
+                <button onClick={() => void handleReleaseTask()} className={plainButton()} disabled={saveStatus === "saving"}>
+                  解锁
+                </button>
+              )}
               {!readOnly &&
                 TOOLS.map((tool) => (
                   <button key={tool.mode} onClick={() => setMode(tool.mode)} className={modeButton(mode === tool.mode)}>
@@ -427,10 +586,24 @@ export default function App() {
               <button onClick={() => void saveCurrentJson()} className={primaryButton()} disabled={readOnly || saveStatus === "saving"}>
                 保存 JSON
               </button>
-              {workspaceMode === "collab" && currentTask && (
-                <button onClick={() => void handleSubmitTask()} className={primaryButton()} disabled={readOnly || saveStatus === "saving"}>
+              {workspaceMode === "collab" && currentTask && user?.role === "annotator" && (
+                <button
+                  onClick={() => void handleSubmitTask()}
+                  className={primaryButton()}
+                  disabled={!canSubmitTask(currentTask, user) || saveStatus === "saving"}
+                >
                   提交任务
                 </button>
+              )}
+              {workspaceMode === "collab" && currentTask && user?.role === "reviewer" && canReviewTask(currentTask, user) && (
+                <>
+                  <button onClick={() => void handleReviewTask()} className={greenButton()}>
+                    审核通过
+                  </button>
+                  <button onClick={() => void handleRejectTask()} className={dangerButton()}>
+                    打回重做
+                  </button>
+                </>
               )}
             </>
           )}
@@ -440,6 +613,7 @@ export default function App() {
       {workspaceMode === "collab" && (
         <CollabPanel
           user={user}
+          users={users}
           projects={projects}
           datasets={datasets}
           tasks={tasks}
@@ -449,16 +623,37 @@ export default function App() {
           uploadSummary={uploadSummary}
           taskStatusFilter={taskStatusFilter}
           taskAssigneeFilter={taskAssigneeFilter}
-          onLogin={async (username, password) => setUser(await login(username, password))}
+          onLogin={async (username, password) => {
+            try {
+              const loggedIn = await login(username, password);
+              setUser(loggedIn);
+              setWorkspaceMode("collab");
+              await refreshProjects();
+              await refreshUsers(loggedIn);
+              toast("success", "登录成功");
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+            }
+          }}
           onCreateUser={async (username, password, role) => {
-            await createUser(username, password, role);
-            toast("success", "用户已创建");
+            try {
+              await createUser(username, password, role);
+              await refreshUsers();
+              toast("success", "用户创建成功");
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+              throw e;
+            }
           }}
           onCreateProject={async (name) => {
-            const project = await createProject(name);
-            await refreshProjects();
-            setSelectedProject(project);
-            await refreshDatasets(project);
+            try {
+              const project = await createProject(name);
+              await refreshProjects();
+              setSelectedProject(project);
+              await refreshDatasets(project);
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+            }
           }}
           onSelectProject={async (project) => {
             setSelectedProject(project);
@@ -468,10 +663,14 @@ export default function App() {
           }}
           onCreateDataset={async (name) => {
             if (!selectedProject) return;
-            const dataset = await createDataset(selectedProject.id, name);
-            await refreshDatasets(selectedProject);
-            setSelectedDataset(dataset);
-            await refreshTasks(dataset);
+            try {
+              const dataset = await createDataset(selectedProject.id, name);
+              await refreshDatasets(selectedProject);
+              setSelectedDataset(dataset);
+              await refreshTasks(dataset);
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+            }
           }}
           onSelectDataset={async (dataset) => {
             setSelectedDataset(dataset);
@@ -479,17 +678,48 @@ export default function App() {
           }}
           onUploadImages={async (files) => {
             if (!selectedDataset) return;
-            const summary = await uploadImages(selectedDataset.id, files);
-            setUploadSummary(summary);
-            await refreshTasks(selectedDataset);
+            try {
+              const summary = await uploadImages(selectedDataset.id, files);
+              setUploadSummary(summary);
+              await refreshTasks(selectedDataset);
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+            }
           }}
           onTaskFilterChange={async (status, assignee) => {
             setTaskStatusFilter(status);
             setTaskAssigneeFilter(assignee);
             if (selectedDataset) setTasks(await listTasks(selectedDataset.id, status, assignee));
           }}
-          onClaimTask={handleClaimTask}
+          onAssignTasks={handleAssignTasks}
           onOpenTask={openTask}
+          onStartTask={handleStartTask}
+          onDeleteProject={async (project) => {
+            if (!window.confirm(`确定删除项目 "${project.name}" 及其所有数据集和图片？此操作不可恢复。`)) return;
+            try {
+              await deleteProject(project.id);
+              toast("success", "项目已删除");
+              setSelectedProject(null);
+              setSelectedDataset(null);
+              resetEditor();
+              await refreshProjects();
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+            }
+          }}
+          onDeleteDataset={async (dataset) => {
+            if (!window.confirm(`确定删除数据集 "${dataset.name}" 及其所有图片？此操作不可恢复。`)) return;
+            try {
+              await deleteDataset(dataset.id);
+              toast("success", "数据集已删除");
+              setSelectedDataset(null);
+              setTasks([]);
+              resetEditor();
+              await refreshDatasets(selectedProject!);
+            } catch (e) {
+              toast("error", friendlyApiError(e));
+            }
+          }}
         />
       )}
 
@@ -516,8 +746,8 @@ export default function App() {
             />
           ) : (
             <div className="flex max-w-md flex-col items-center justify-center gap-3 self-center rounded border border-dashed border-stone-400 bg-[#f7f2e8] p-8 text-center text-stone-600">
-              <p className="text-lg font-semibold text-stone-800">选择本地文件夹或进入协作任务</p>
-              <p className="text-sm">单机模式继续直接读写同名 JSON；协作模式会从后端任务和数据库加载图片与标注。</p>
+              <p className="text-lg font-semibold text-stone-800">请选择图片或协作任务</p>
+              <p className="text-sm">单机模式可直接打开本地文件夹；协作模式由管理员上传图片并分配任务。</p>
             </div>
           )}
         </main>
@@ -532,6 +762,7 @@ export default function App() {
 
 function CollabPanel({
   user,
+  users,
   projects,
   datasets,
   tasks,
@@ -549,10 +780,14 @@ function CollabPanel({
   onSelectDataset,
   onUploadImages,
   onTaskFilterChange,
-  onClaimTask,
+  onAssignTasks,
   onOpenTask,
+  onStartTask,
+  onDeleteProject,
+  onDeleteDataset,
 }: {
   user: CollabUser | null;
+  users: CollabUser[];
   projects: Project[];
   datasets: Dataset[];
   tasks: TaskItem[];
@@ -570,8 +805,11 @@ function CollabPanel({
   onSelectDataset: (dataset: Dataset) => Promise<void>;
   onUploadImages: (files: File[]) => Promise<void>;
   onTaskFilterChange: (status: string, assignee: string) => Promise<void>;
-  onClaimTask: (task: TaskItem) => Promise<void>;
+  onAssignTasks: (taskIds: number[], assigneeId: number | null) => Promise<void>;
   onOpenTask: (task: TaskItem) => Promise<void>;
+  onStartTask: (task: TaskItem) => Promise<void>;
+  onDeleteProject: (project: Project) => Promise<void>;
+  onDeleteDataset: (dataset: Dataset) => Promise<void>;
 }) {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
@@ -581,25 +819,35 @@ function CollabPanel({
   const [projectName, setProjectName] = useState("");
   const [datasetName, setDatasetName] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
+  const [bulkAssignee, setBulkAssignee] = useState("");
+
+  const annotators = users.filter((item) => item.role === "annotator");
+
+  useEffect(() => {
+    setSelectedTaskIds([]);
+  }, [selectedDataset?.id]);
 
   if (!user) {
     return (
-      <section className="flex shrink-0 items-center gap-2 border-b border-stone-300 bg-stone-50 px-4 py-2">
+      <section className="flex shrink-0 flex-wrap items-center gap-2 border-b border-stone-300 bg-stone-50 px-4 py-2">
         <input value={username} onChange={(e) => setUsername(e.target.value)} className={inputClass()} placeholder="用户名" />
         <input value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass()} placeholder="密码" type="password" />
         <button onClick={() => void onLogin(username, password)} className={primaryButton()}>
           登录协作平台
         </button>
-        <span className="text-xs text-stone-500">首次登录会创建第一个管理员账号。</span>
+        <span className="text-xs text-stone-500">数据库为空时，第一个成功登录的用户会自动成为管理员。</span>
       </section>
     );
   }
 
   return (
     <section className="flex shrink-0 flex-wrap items-center gap-2 border-b border-stone-300 bg-stone-50 px-4 py-2 text-sm">
-      <span className="font-medium">{user.username} / {user.role}</span>
       {user.role === "admin" && (
         <>
+          <span className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+            管理员负责上传图片、创建用户和分配任务；标注请使用 annotator 账号。
+          </span>
           <input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className={inputClass()} placeholder="新用户名" />
           <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={inputClass()} placeholder="新用户密码" type="password" />
           <select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)} className={inputClass("w-32")}>
@@ -607,37 +855,75 @@ function CollabPanel({
             <option value="reviewer">reviewer</option>
             <option value="admin">admin</option>
           </select>
-          <button onClick={() => newUsername && newPassword && void onCreateUser(newUsername, newPassword, newRole)} className={plainButton()}>
+          <button
+            onClick={async () => {
+              if (!newUsername || !newPassword) return;
+              await onCreateUser(newUsername, newPassword, newRole);
+              setNewUsername("");
+              setNewPassword("");
+              setNewRole("annotator");
+            }}
+            className={plainButton()}
+          >
             创建用户
           </button>
         </>
       )}
-      <input value={projectName} onChange={(e) => setProjectName(e.target.value)} className={inputClass()} placeholder="新项目名" />
+
+      <input value={projectName} onChange={(e) => setProjectName(e.target.value)} className={inputClass()} placeholder="项目名称" />
       <button onClick={() => projectName && void onCreateProject(projectName)} className={plainButton()}>
         创建项目
       </button>
-      <select value={selectedProject?.id ?? ""} onChange={(e) => {
-        const project = projects.find((item) => item.id === Number(e.target.value));
-        if (project) void onSelectProject(project);
-      }} className={inputClass()}>
+      <select
+        value={selectedProject?.id ?? ""}
+        onChange={(e) => {
+          const project = projects.find((item) => item.id === Number(e.target.value));
+          if (project) void onSelectProject(project);
+        }}
+        className={inputClass()}
+      >
         <option value="">选择项目</option>
-        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        {projects.map((project) => (
+          <option key={project.id} value={project.id}>
+            {project.name}
+          </option>
+        ))}
       </select>
+      {user.role === "admin" && selectedProject && (
+        <button onClick={() => void onDeleteProject(selectedProject)} className={dangerButton()}>
+          删除项目
+        </button>
+      )}
+
       {selectedProject && (
         <>
-          <input value={datasetName} onChange={(e) => setDatasetName(e.target.value)} className={inputClass()} placeholder="新数据集名" />
+          <input value={datasetName} onChange={(e) => setDatasetName(e.target.value)} className={inputClass()} placeholder="数据集名称" />
           <button onClick={() => datasetName && void onCreateDataset(datasetName)} className={plainButton()}>
             创建数据集
           </button>
-          <select value={selectedDataset?.id ?? ""} onChange={(e) => {
-            const dataset = datasets.find((item) => item.id === Number(e.target.value));
-            if (dataset) void onSelectDataset(dataset);
-          }} className={inputClass()}>
+          <select
+            value={selectedDataset?.id ?? ""}
+            onChange={(e) => {
+              const dataset = datasets.find((item) => item.id === Number(e.target.value));
+              if (dataset) void onSelectDataset(dataset);
+            }}
+            className={inputClass()}
+          >
             <option value="">选择数据集</option>
-            {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+            {datasets.map((dataset) => (
+              <option key={dataset.id} value={dataset.id}>
+                {dataset.name}
+              </option>
+            ))}
           </select>
+          {user.role === "admin" && selectedDataset && (
+            <button onClick={() => void onDeleteDataset(selectedDataset)} className={dangerButton()}>
+              删除数据集
+            </button>
+          )}
         </>
       )}
+
       {selectedDataset && (
         <>
           {user.role === "admin" && (
@@ -654,35 +940,139 @@ function CollabPanel({
               </button>
             </>
           )}
-          {uploadSummary && <span>上传 {uploadSummary.imported}，跳过 {uploadSummary.skipped}，错误 {uploadSummary.errors.length}</span>}
+          {uploadSummary && (
+            <span>
+              上传 {uploadSummary.imported}，跳过 {uploadSummary.skipped}，错误 {uploadSummary.errors.length}
+            </span>
+          )}
           <select value={taskStatusFilter} onChange={(e) => void onTaskFilterChange(e.target.value, taskAssigneeFilter)} className={inputClass("w-32")}>
             <option value="">全部状态</option>
-            <option value="unassigned">未领取</option>
-            <option value="in_progress">进行中</option>
+            <option value="unassigned">未分配</option>
+            <option value="assigned">已分配</option>
+            <option value="in_progress">标注中</option>
             <option value="submitted">已提交</option>
             <option value="reviewed">已审核</option>
             <option value="rejected">已打回</option>
           </select>
-          <select value={taskAssigneeFilter} onChange={(e) => void onTaskFilterChange(taskStatusFilter, e.target.value)} className={inputClass("w-28")}>
-            <option value="">全部人</option>
-            <option value="me">我的</option>
+          <select value={taskAssigneeFilter} onChange={(e) => void onTaskFilterChange(taskStatusFilter, e.target.value)} className={inputClass("w-32")}>
+            <option value="">全部分配</option>
+            <option value="me">我的任务</option>
           </select>
           <span>任务 {tasks.length}</span>
-          <select value={currentTask?.id ?? ""} onChange={(e) => {
-            const task = tasks.find((item) => item.id === Number(e.target.value));
-            if (task) void onOpenTask(task);
-          }} className={inputClass("w-56")}>
-            <option value="">打开任务</option>
-            {tasks.map((task) => <option key={task.id} value={task.id}>{task.image_name} / {task.status}</option>)}
-          </select>
-          {tasks.slice(0, 3).map((task) => (
-            <button key={task.id} onClick={() => void onClaimTask(task)} className={plainButton()}>
-              领取 {task.image_name}
-            </button>
-          ))}
+
+          {user.role === "admin" && (
+            <>
+              <select value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)} className={inputClass("w-40")}>
+                <option value="">取消分配</option>
+                {annotators.map((annotator) => (
+                  <option key={annotator.id} value={annotator.id}>
+                    {annotator.username}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  const taskIds = [...selectedTaskIds];
+                  void onAssignTasks(taskIds, bulkAssignee ? Number(bulkAssignee) : null).then(() => setSelectedTaskIds([]));
+                }}
+                className={plainButton()}
+                disabled={selectedTaskIds.length === 0}
+              >
+                分配选中任务
+              </button>
+            </>
+          )}
+
+          <div className="flex max-w-full flex-wrap gap-1">
+            {tasks.slice(0, 24).map((task) => (
+              <TaskButton
+                key={task.id}
+                task={task}
+                user={user}
+                users={users}
+                active={currentTask?.id === task.id}
+                selected={selectedTaskIds.includes(task.id)}
+                onSelect={(checked) => {
+                  setSelectedTaskIds((current) => checked ? [...current, task.id] : current.filter((id) => id !== task.id));
+                }}
+                onAssign={(assigneeId) => void onAssignTasks([task.id], assigneeId)}
+                onOpenTask={onOpenTask}
+                onStartTask={onStartTask}
+              />
+            ))}
+          </div>
         </>
       )}
     </section>
+  );
+}
+
+function TaskButton({
+  task,
+  user,
+  users,
+  active,
+  selected,
+  onSelect,
+  onAssign,
+  onOpenTask,
+  onStartTask,
+}: {
+  task: TaskItem;
+  user: CollabUser;
+  users: CollabUser[];
+  active: boolean;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
+  onAssign: (assigneeId: number | null) => void;
+  onOpenTask: (task: TaskItem) => Promise<void>;
+  onStartTask: (task: TaskItem) => Promise<void>;
+}) {
+  const assigneeName = users.find((item) => item.id === task.assignee_id)?.username ?? (task.assignee_id ? `用户 ${task.assignee_id}` : "未分配");
+  const lockText = task.locked_by
+    ? task.locked_by === user.id
+      ? "我已锁定"
+      : `锁定人 ${task.locked_by}`
+    : "未锁定";
+
+  return (
+    <div
+      className={`min-w-44 rounded border p-2 text-xs ${
+        active ? "border-stone-900 bg-stone-900 text-white" : "border-stone-300 bg-white text-stone-700"
+      }`}
+      title={`${task.image_name} / ${taskStatusLabel(task.status)} / ${assigneeName} / ${lockText}`}
+    >
+      <div className="flex items-start gap-2">
+        {user.role === "admin" && canAssignTask(task, user) && (
+          <input type="checkbox" checked={selected} onChange={(e) => onSelect(e.target.checked)} />
+        )}
+        <button className="min-w-0 flex-1 text-left" onClick={() => void onOpenTask(task)}>
+          <span className="block max-w-36 truncate font-medium">{task.image_name}</span>
+          <span className="block opacity-80">{taskStatusLabel(task.status)} / {lockText}</span>
+          <span className="block opacity-80">分配：{assigneeName}</span>
+          <span className="block font-medium">{taskActionLabel(task, user)}</span>
+        </button>
+      </div>
+      {user.role === "admin" && canAssignTask(task, user) && (
+        <select
+          value={task.assignee_id ?? ""}
+          onChange={(e) => onAssign(e.target.value ? Number(e.target.value) : null)}
+          className="mt-1 w-full rounded border border-stone-300 bg-white px-1 py-1 text-stone-700"
+        >
+          <option value="">未分配</option>
+          {users.filter((item) => item.role === "annotator").map((annotator) => (
+            <option key={annotator.id} value={annotator.id}>
+              {annotator.username}
+            </option>
+          ))}
+        </select>
+      )}
+      {canStartTask(task, user) && (
+        <button onClick={() => void onStartTask(task)} className="mt-1 w-full rounded border border-amber-800 bg-amber-800 px-2 py-1 font-medium text-white hover:bg-amber-900">
+          开始标注
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -61,7 +61,11 @@ def list_users(
 
 
 @router.post("/session", response_model=UserResponse)
-def create_session(payload: UserSessionRequest, db: Session = Depends(get_db)) -> UserResponse:
+def create_session(
+    payload: UserSessionRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_roles("admin")),
+) -> UserResponse:
     """Legacy dev-only session helper; prefer /api/auth/login."""
     role = payload.role if payload.role in VALID_ROLES else "annotator"
     username = payload.username.strip()

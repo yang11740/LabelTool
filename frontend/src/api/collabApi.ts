@@ -4,7 +4,7 @@ const BASE = "/api";
 const TOKEN_KEY = "labelme_web_token";
 
 export type UserRole = "admin" | "annotator" | "reviewer";
-export type TaskStatus = "unassigned" | "in_progress" | "submitted" | "reviewed" | "rejected";
+export type TaskStatus = "unassigned" | "assigned" | "in_progress" | "submitted" | "reviewed" | "rejected";
 
 export interface CollabUser {
   id: number;
@@ -95,6 +95,10 @@ export async function getMe(): Promise<CollabUser> {
   return apiJson("/auth/me");
 }
 
+export async function listUsers(): Promise<CollabUser[]> {
+  return apiJson("/users");
+}
+
 export async function createUser(username: string, password: string, role: UserRole): Promise<CollabUser> {
   return apiJson("/users", {
     method: "POST",
@@ -124,6 +128,14 @@ export async function createDataset(projectId: number, name: string, description
   });
 }
 
+export async function deleteProject(projectId: number): Promise<void> {
+  await apiJson(`/projects/${projectId}`, { method: "DELETE" });
+}
+
+export async function deleteDataset(datasetId: number): Promise<void> {
+  await apiJson(`/datasets/${datasetId}`, { method: "DELETE" });
+}
+
 export async function uploadImages(datasetId: number, files: File[]): Promise<UploadSummary> {
   const form = new FormData();
   for (const file of files) form.append("files", file);
@@ -145,8 +157,30 @@ export async function listTasks(datasetId: number, status = "", assignee = ""): 
   return apiJson(`/tasks?${query.toString()}`);
 }
 
+export async function assignTask(taskId: number, assigneeId: number | null): Promise<TaskItem> {
+  return apiJson(`/tasks/${taskId}/assign`, {
+    method: "POST",
+    body: JSON.stringify({ assignee_id: assigneeId }),
+  });
+}
+
+export async function bulkAssignTasks(taskIds: number[], assigneeId: number | null): Promise<TaskItem[]> {
+  return apiJson("/tasks/bulk-assign", {
+    method: "POST",
+    body: JSON.stringify({ task_ids: taskIds, assignee_id: assigneeId }),
+  });
+}
+
 export async function claimTask(taskId: number): Promise<TaskItem> {
-  return apiJson(`/tasks/${taskId}/claim`, { method: "POST" });
+  return startTask(taskId);
+}
+
+export async function startTask(taskId: number): Promise<TaskItem> {
+  return apiJson(`/tasks/${taskId}/start`, { method: "POST" });
+}
+
+export async function releaseTask(taskId: number): Promise<TaskItem> {
+  return apiJson(`/tasks/${taskId}/release`, { method: "POST" });
 }
 
 export async function readTaskAnnotation(taskId: number): Promise<TaskAnnotation> {
@@ -167,6 +201,14 @@ export async function submitTask(taskId: number): Promise<TaskItem> {
   return apiJson(`/tasks/${taskId}/submit`, { method: "POST" });
 }
 
+export async function reviewTask(taskId: number): Promise<TaskItem> {
+  return apiJson(`/tasks/${taskId}/review`, { method: "POST" });
+}
+
+export async function rejectTask(taskId: number): Promise<TaskItem> {
+  return apiJson(`/tasks/${taskId}/reject`, { method: "POST" });
+}
+
 export async function listTaskVersions(taskId: number): Promise<AnnotationVersion[]> {
   return apiJson(`/tasks/${taskId}/versions`);
 }
@@ -177,8 +219,87 @@ export function collabImageUrl(imageId: number): string {
   return `${BASE}/images/${imageId}/file${query}`;
 }
 
+export function canAssignTask(task: TaskItem | null, user: CollabUser | null): boolean {
+  return Boolean(task && user?.role === "admin" && !task.locked_by && task.status !== "reviewed");
+}
+
+export function canStartTask(task: TaskItem | null, user: CollabUser | null): boolean {
+  return Boolean(
+    task &&
+      user?.role === "annotator" &&
+      task.assignee_id === user.id &&
+      (task.locked_by === null || task.locked_by === user.id) &&
+      (task.status === "assigned" || task.status === "submitted" || task.status === "rejected"),
+  );
+}
+
 export function canEditTask(task: TaskItem | null, user: CollabUser | null): boolean {
-  return Boolean(task && user && task.locked_by === user.id && task.status === "in_progress");
+  return Boolean(task && user?.role === "annotator" && task.locked_by === user.id && task.status === "in_progress");
+}
+
+export function canReleaseTask(task: TaskItem | null, user: CollabUser | null): boolean {
+  return Boolean(
+    task &&
+    task.locked_by !== null &&
+    (
+      (user?.role === "annotator" && task.locked_by === user.id && task.status === "in_progress") ||
+      user?.role === "admin"
+    ),
+  );
+}
+
+export function canSubmitTask(task: TaskItem | null, user: CollabUser | null): boolean {
+  return canEditTask(task, user);
+}
+
+export function canReviewTask(task: TaskItem | null, user: CollabUser | null): boolean {
+  return Boolean(task && user?.role === "reviewer" && task.status === "submitted");
+}
+
+export function canRejectTask(task: TaskItem | null, user: CollabUser | null): boolean {
+  return canReviewTask(task, user);
+}
+
+export function taskActionLabel(task: TaskItem, user: CollabUser | null): string {
+  if (!user) return "只读查看";
+  if (canEditTask(task, user)) return "已锁定，可编辑";
+  if (canStartTask(task, user)) return "打开查看，可手动锁定";
+  if (user.role === "admin" && task.locked_by !== null) return "管理员可解锁";
+  if (user.role === "annotator" && task.assignee_id === user.id) return "打开查看";
+  if (user.role === "admin") return "查看/分配";
+  return "只读查看";
+}
+
+export function taskStatusLabel(status: TaskStatus): string {
+  const labels: Record<TaskStatus, string> = {
+    unassigned: "未分配",
+    assigned: "已分配",
+    in_progress: "标注中",
+    submitted: "已提交",
+    reviewed: "已审核",
+    rejected: "已打回",
+  };
+  return labels[status] ?? status;
+}
+
+export function friendlyApiError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("403") || message.includes("Permission denied") || message.includes("Role required")) {
+    return "当前账号角色无权执行此操作，请切换到有权限的账号。";
+  }
+  if (message.includes("401") || message.includes("Authentication required") || message.includes("Invalid or expired token")) {
+    return "登录状态已失效，请重新登录。";
+  }
+  if (message.includes("not assigned")) {
+    return "该任务没有分配给当前账号，不能开始标注。";
+  }
+  if (message.includes("409") || message.includes("locked")) {
+    return "任务已被锁定或当前状态不允许该操作。";
+  }
+  if (message.includes("Username already exists")) {
+    return "用户名已存在，请换一个用户名。";
+  }
+  return message;
 }
 
 type ApiInit = RequestInit & { skipJsonHeader?: boolean };
@@ -197,7 +318,7 @@ async function apiJson<T>(path: string, init: ApiInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(detail || `${res.status} ${res.statusText}`);
+    throw new Error(`${res.status} ${detail || res.statusText}`);
   }
   return res.json();
 }
