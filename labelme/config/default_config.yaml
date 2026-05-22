@@ -74,6 +74,14 @@ canvas:
     linestrip: false
     ai_points_to_shape: false
     ai_box_to_shape: true
+
+# image loading
+image:
+  # Maximum dimensions when loading images. Images exceeding these limits
+  # are proportionally downscaled. Set to 0 to disable.
+  max_height: 2000
+  max_width: 2000
+
 shortcuts:
   close: Ctrl+W
   open: Ctrl+O
