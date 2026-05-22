@@ -24,7 +24,7 @@
 ### 下载安装
 
 1. 前往 [Releases](https://github.com/yang11740/LabelTool/releases) 页面
-2. 下载最新的 `desktop-v2.exe`到任意目录
+2. 下载最新的 `desktop-v3.exe`到任意目录
 3. 双击运行即可
 
 > **提示**：首次启动需要初始化环境，可能需要一段时间。
