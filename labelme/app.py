@@ -165,6 +165,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _output_dir: Path | None
     _image: QtGui.QImage
     _image_data: bytes | None
+    _image_scaled: bool
     _label_file: LabelFile | None
     _image_path: str | None
     _prev_image_path: str | None
@@ -893,6 +894,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._output_dir = Path(output_dir) if output_dir else None
 
         self._image = QtGui.QImage()
+        self._image_scaled = False
         self._label_file = None
         self._image_path = None
         self._prev_image_path = None
@@ -1176,6 +1178,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._image_data = None
         self._label_file = None
         self._other_data = None
+        self._image_scaled = False
         self._canvas_widgets.canvas.reset_state()
 
     # Callbacks
@@ -1821,6 +1824,54 @@ class MainWindow(QtWidgets.QMainWindow):
             target = item.checkState() == Qt.Unchecked if value is None else value
             item.setCheckState(Qt.Checked if target else Qt.Unchecked)
 
+    def _resize_image(
+        self, image: QtGui.QImage, target_w: int, target_h: int
+    ) -> QtGui.QImage:
+        logger.info(
+            "Resizing image from %dx%d to %dx%d",
+            image.width(), image.height(), target_w, target_h,
+        )
+        scaled: QtGui.QImage = image.scaled(
+            target_w, target_h,
+            QtCore.Qt.IgnoreAspectRatio,
+            QtCore.Qt.SmoothTransformation,
+        )
+        buffer = QtCore.QBuffer()
+        buffer.open(QtCore.QBuffer.ReadWrite)
+        scaled.save(buffer, "PNG")
+        self._image_data = bytes(buffer.data())
+        buffer.close()
+        self._image_scaled = True
+        return scaled
+
+    def _apply_image_size_limit(self, image: QtGui.QImage) -> QtGui.QImage:
+        """Downscale image proportionally if it exceeds configured max dimensions."""
+        max_width: int = self._config.get("image", {}).get("max_width", 0)
+        max_height: int = self._config.get("image", {}).get("max_height", 0)
+
+        if max_width <= 0 and max_height <= 0:
+            return image
+
+        orig_width: int = image.width()
+        orig_height: int = image.height()
+
+        exceeds_width: bool = max_width > 0 and orig_width > max_width
+        exceeds_height: bool = max_height > 0 and orig_height > max_height
+
+        if not exceeds_width and not exceeds_height:
+            return image
+
+        scale_w: float = max_width / orig_width if max_width > 0 else 1.0
+        scale_h: float = max_height / orig_height if max_height > 0 else 1.0
+        scale: float = min(scale_w, scale_h, 1.0)
+
+        if scale >= 1.0:
+            return image
+
+        new_width: int = max(1, int(orig_width * scale))
+        new_height: int = max(1, int(orig_height * scale))
+        return self._resize_image(image, new_width, new_height)
+
     def _load_file(self, image_or_label_path: str) -> None:
         # changing fileListWidget loads file
         if image_or_label_path in self.image_list and (
@@ -1918,6 +1969,30 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self.show_status_message(self.tr("Error reading %s") % image_or_label_path)
             return
+        # Determine whether to scale: compare JSON dimensions with actual image
+        if self._label_file is not None:
+            json_w = self._label_file.image_width
+            json_h = self._label_file.image_height
+            actual_w, actual_h = image.width(), image.height()
+
+            # Apply current config limits to get target dimensions
+            image = self._apply_image_size_limit(image)
+            target_w, target_h = image.width(), image.height()
+
+            # Determine the annotation coordinate space the shapes were saved in
+            annot_w = json_w if json_w is not None else actual_w
+            annot_h = json_h if json_h is not None else actual_h
+
+            # If target differs from annotation space, migrate coordinates
+            if (target_w, target_h) != (annot_w, annot_h):
+                sx, sy = target_w / annot_w, target_h / annot_h
+                for sd in self._label_file.shapes:
+                    for pt in sd["points"]:
+                        pt[0] = round(pt[0] * sx, 3)
+                        pt[1] = round(pt[1] * sy, 3)
+        else:
+            # No label file → new image → scale based on config limits
+            image = self._apply_image_size_limit(image)
         self._image = image
         t0 = time.time()
         self._canvas_widgets.canvas.load_pixmap(QtGui.QPixmap.fromImage(image))
@@ -2767,7 +2842,7 @@ def _shape_to_dict(shape: Shape) -> dict[str, Any]:
         "shape_type": shape.shape_type,
         "transcription_raw": shape.transcription_raw,
         "transcription_semantic": shape.transcription_semantic,
-        "points": [(round(p.x(), 2), round(p.y(), 2)) for p in shape.points],
+        "points": [(round(p.x(), 3), round(p.y(), 3)) for p in shape.points],
         "attributes": shape.attributes,
         "edges": shape.edges,
     }

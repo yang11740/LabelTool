@@ -210,6 +210,8 @@ class LabelFile:
         self.shapes: list[ShapeDict] = []
         self.image_path: str | None = None
         self.image_data: bytes | None = None
+        self.image_height: int | None = None
+        self.image_width: int | None = None
         self.other_data: dict[str, Any] = {}
         self.flags: dict[str, bool] = {}
         if filename is not None:
@@ -333,11 +335,8 @@ class LabelFile:
             else:
                 image_data = self.load_image_file(image_file)
             flags = data.get("flags") or {}
-            self._check_image_height_and_width(
-                image_data,
-                data.get("imageHeight"),
-                data.get("imageWidth"),
-            )
+            self.image_height = data.get("imageHeight")
+            self.image_width = data.get("imageWidth")
             shapes: list[ShapeDict] = [
                 _load_shape_json_obj(shape_json_obj=s) for s in data["shapes"]
             ]
