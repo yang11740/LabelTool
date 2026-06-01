@@ -221,6 +221,11 @@ class LabelDialog(QtWidgets.QDialog):
         self.edges_table.setColumnWidth(0, 130)
         self.edges_table.setColumnWidth(1, 160)
         self.edges_table.setFixedHeight(120)
+        # 明确编辑触发方式：双击或按 F2/Enter 才进入编辑，避免单击误触导致焦点冲突
+        self.edges_table.setEditTriggers(
+            QtWidgets.QAbstractItemView.DoubleClicked
+            | QtWidgets.QAbstractItemView.EditKeyPressed
+        )
         layout.addWidget(self.edges_table)
 
         # label_list 候选列表
@@ -324,6 +329,12 @@ class LabelDialog(QtWidgets.QDialog):
                 return
 
     def _clear_edges_table(self):
+        # 关闭所有活跃的持久编辑器，防止 cell editor 在被清空时残留导致崩溃
+        for row in range(self.edges_table.rowCount()):
+            for col in range(self.edges_table.columnCount()):
+                self.edges_table.closePersistentEditor(
+                    self.edges_table.item(row, col)
+                )
         self.edges_table.setRowCount(0)
 
     def add_label_history(self, label: str) -> None:
@@ -515,7 +526,9 @@ class LabelDialog(QtWidgets.QDialog):
             self.label_list.setCurrentItem(items[0])
             row = self.label_list.row(items[0])
             # self.edit.completer().setCurrentRow(row)
-        self.edit.setFocus(QtCore.Qt.PopupFocusReason)
+        # NOTE: 不在此处强制 setFocus 到 QComboBox，避免与 edges_table 的 cell editor
+        # 争夺焦点导致"无法输入→卡死→闪退"。改为让 Qt 根据用户点击自行分发焦点。
+        # self.edit.setFocus(QtCore.Qt.PopupFocusReason)
         if move:
             self.move(QtGui.QCursor.pos())
 

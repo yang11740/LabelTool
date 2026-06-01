@@ -102,10 +102,6 @@ class Shape:
             # Per-instance line color override (used for the pending line).
             self.line_color = line_color
 
-        if line_color is not None:
-            # Per-instance line color override (used for the pending line).
-            self.line_color = line_color
-
     def refine(
         self,
         shape_type: str,
@@ -210,7 +206,11 @@ class Shape:
 
     def nearest_edge(self, point: QtCore.QPointF, epsilon: float) -> int | None:
         return _nearest_edge_index(
-            point=point, points=self.points, scale=self.scale, epsilon=epsilon
+            point=point,
+            points=self.points,
+            scale=self.scale,
+            epsilon=epsilon,
+            closed=self._closed,
         )
 
     def contains_point(self, point: QtCore.QPointF) -> bool:
@@ -307,11 +307,15 @@ def _nearest_edge_index(
     points: list[QtCore.QPointF],
     scale: float,
     epsilon: float,
+    closed: bool = True,
 ) -> int | None:
     min_distance = float("inf")
     post_i = None
     scaled = _scale_point(point=point, scale=scale)
-    for i in range(len(points)):
+    # For open shapes (linestrip, line), skip the spurious closing edge
+    # between points[-1] and points[0] that does not exist in the geometry.
+    start_range = 0 if closed else 1
+    for i in range(start_range, len(points)):
         start = _scale_point(point=points[i - 1], scale=scale)
         end = _scale_point(point=points[i], scale=scale)
         dist = labelme.utils.distance_to_line(scaled, (start, end))
