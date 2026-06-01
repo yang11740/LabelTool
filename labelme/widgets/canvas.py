@@ -69,7 +69,7 @@ class Canvas(QtWidgets.QWidget):
     _fill_drawing = False
 
     prev_point: QPointF
-    prev_move_point: QPointF
+    prev_move_point: QPointF | None
     offsets: tuple[QPointF, QPointF]
 
     _pan_anchor: QPointF | None
@@ -105,7 +105,7 @@ class Canvas(QtWidgets.QWidget):
         #   - create_mode == 'point': the point
         self.line = Shape()
         self.prev_point = QPointF()
-        self.prev_move_point = QPointF()
+        self.prev_move_point = None
         self.offsets = QPointF(), QPointF()
         self.scale: float = 1.0
         self._hide_background: bool = False
@@ -146,6 +146,11 @@ class Canvas(QtWidgets.QWidget):
 
     def backup_shapes(self) -> None:
         self.shape_backups.append([s.copy() for s in self.shapes])
+
+    def pop_shape_backup(self) -> None:
+        """Remove the most recent shape backup entry, if any."""
+        if self.shape_backups:
+            self.shape_backups.pop()
 
     @property
     def can_restore_shape(self) -> bool:
@@ -699,7 +704,10 @@ class Canvas(QtWidgets.QWidget):
         if moved is None:
             return
         index = self.shapes.index(moved)
-        if self.shape_backups[-1][index].points != self.shapes[index].points:
+        if (
+            self.shape_backups
+            and self.shape_backups[-1][index].points != self.shapes[index].points
+        ):
             self.backup_shapes()
             self.shape_moved.emit()
         self.is_moving_shape = False
@@ -1152,7 +1160,10 @@ class Canvas(QtWidgets.QWidget):
                 and self.selected_shapes[0] in self.shapes
             ):
                 index = self.shapes.index(self.selected_shapes[0])
-                if self.shape_backups[-1][index].points != self.shapes[index].points:
+                if (
+                    self.shape_backups
+                    and self.shape_backups[-1][index].points != self.shapes[index].points
+                ):
                     self.backup_shapes()
                     self.shape_moved.emit()
 
@@ -1170,7 +1181,8 @@ class Canvas(QtWidgets.QWidget):
         for shape in shapes:
             shape.label = text
             shape.flags = flags
-        self.shape_backups.pop()
+        if self.shape_backups:
+            self.shape_backups.pop()
         self.backup_shapes()
         return shapes
 

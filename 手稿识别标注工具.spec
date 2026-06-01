@@ -5,7 +5,7 @@ a = Analysis(
     ['run_tool.py'],
     pathex=[],
     binaries=[],
-    datas=[('labelme\\config', 'labelme\\config'), ('labelme\\icons', 'labelme\\icons')],
+    datas=[('labelme\\config', 'labelme\\config'), ('labelme\\icons', 'labelme\\icons'), ('labelme\\translate', 'labelme\\translate')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

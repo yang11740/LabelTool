@@ -67,7 +67,11 @@ def test_LabelDialog_popup(qtbot: QtBot) -> None:
         qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
 
     QtCore.QTimer.singleShot(500, interact)
-    label, flags, group_id, description = widget.popup("cat")
+    (
+        label, flags, group_id, description,
+        node_id, transcription_raw, transcription_semantic,
+        attributes, edges,
+    ) = widget.popup("cat")
     assert label == "person"
     assert flags == {}
     assert group_id is None
@@ -80,7 +84,11 @@ def test_LabelDialog_popup(qtbot: QtBot) -> None:
         qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
 
     QtCore.QTimer.singleShot(500, interact)
-    label, flags, group_id, description = widget.popup()
+    (
+        label, flags, group_id, description,
+        node_id, transcription_raw, transcription_semantic,
+        attributes, edges,
+    ) = widget.popup()
     assert label == "person"
     assert flags == {}
     assert group_id is None
@@ -94,7 +102,11 @@ def test_LabelDialog_popup(qtbot: QtBot) -> None:
         qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
 
     QtCore.QTimer.singleShot(500, interact)
-    label, flags, group_id, description = widget.popup()
+    (
+        label, flags, group_id, description,
+        node_id, transcription_raw, transcription_semantic,
+        attributes, edges,
+    ) = widget.popup()
     assert label == "dog"
     assert flags == {}
     assert group_id is None

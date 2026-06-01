@@ -42,6 +42,8 @@ class ShapeDict(TypedDict):
 
 
 def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
+    # 在浅拷贝上操作，避免修改调用方持有的原始 dict
+    shape_json_obj = dict(shape_json_obj)
     SHAPE_KEYS: set[str] = {
         "label",
         "points",
@@ -363,10 +365,16 @@ class LabelFile:
         """根据 JSON 标注文件名查找对应的图片文件。"""
         parent = Path(label_path).parent
         stem = Path(label_path).stem
+        # 1) 先在 JSON 同目录查找（最常见的情况）
         for ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".gif"):
             candidate = parent / f"{stem}{ext}"
             if candidate.exists():
                 return str(candidate)
+        # 2) 同目录未找到，递归搜索子目录（适配图片放在子目录的场景）
+        for ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".gif"):
+            candidates = list(parent.rglob(f"{stem}{ext}"))
+            if candidates:
+                return str(candidates[0])
         raise LabelFileError(
             f"Cannot find image file for label: {label_path}"
         )
@@ -415,10 +423,13 @@ class LabelFile:
             "imageHeight": image_height,
             "imageWidth": image_width,
         }
-        for key, value in other_data.items():
-            assert key not in data
-            data[key] = value
         try:
+            for key, value in other_data.items():
+                if key in data:
+                    raise KeyError(
+                        f"other_data key {key!r} collides with reserved key"
+                    )
+                data[key] = value
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             self.filename = filename

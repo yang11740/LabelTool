@@ -8,6 +8,7 @@ import platform
 import re
 import subprocess
 import time
+import traceback
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
@@ -43,6 +44,7 @@ from labelme.widgets import StatusStats
 from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
+from labelme.widgets import format_shape_label
 
 from . import utils
 
@@ -352,8 +354,8 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr('Toggle "keep previous annotation" mode'),
             checkable=True,
         )
-        # 强制关闭，避免切图不更新的错觉
-        self._config["keep_prev"] = False
+        # 首次启动时默认关闭，避免切图不更新的错觉
+        self._config.setdefault("keep_prev", False)
         toggle_keep_prev_mode.setChecked(False)
         toggle_keep_prev_mode.setChecked(self._config["keep_prev"])
         toggle_keep_prev_brightness_contrast = action(
@@ -1139,13 +1141,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self._actions.save_auto.isChecked():
             assert self._image_path is not None
-            self.save_labels(
-                label_path=_resolve_label_path(
-                    image_or_label_path=self._image_path,
-                    output_dir=self._output_dir,
-                )
+            label_path = _resolve_label_path(
+                image_or_label_path=self._image_path,
+                output_dir=self._output_dir,
             )
-            return
+            if self.save_labels(label_path=label_path):
+                return  # auto-save succeeded, no need to mark dirty
+            # auto-save failed — fall through to mark dirty so user gets
+            # a "Save changes?" prompt on close instead of silently losing edits
         self._is_changed = True
         self._actions.save.setEnabled(True)
         self.setWindowTitle(self._get_window_title(dirty=True))
@@ -1373,9 +1376,17 @@ class MainWindow(QtWidgets.QMainWindow):
                         ),
                     )
         except Exception as e:
-            # === 捕获崩溃 ===
+            # === 捕获崩溃：写日志 + 弹窗提示（不再静默吞掉） ===
             logger.error("🔥 致命错误：app._edit_label 发生崩溃！")
             logger.error(traceback.format_exc())
+            QtWidgets.QMessageBox.critical(
+                self,
+                "编辑标注失败",
+                f"保存标注属性时发生错误，修改未保存。\n\n"
+                f"错误类型：{type(e).__name__}\n"
+                f"错误信息：{e}\n\n"
+                f"详细堆栈已写入日志文件，请向开发者反馈。",
+            )
 
     def _on_file_search_changed(self) -> None:
         self._import_images_from_dir(
@@ -1673,7 +1684,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.mark_dirty()
         else:
             self._canvas_widgets.canvas.undo_last_line()
-            self._canvas_widgets.canvas.shape_backups.pop()
+            self._canvas_widgets.canvas.pop_shape_backup()
 
     def _on_scroll_request(self, delta: int, orientation: Qt.Orientation) -> None:
         units = -delta * 0.1  # natural scroll
@@ -2459,7 +2470,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if path not in already_loaded and path.lower().endswith(extensions)
         ]
 
-        self._image_path = None
+        if new_files:
+            self._image_path = None
         for path in new_files:
             self._docks.file_list.addItem(
                 _make_image_list_item(image_path=path, output_dir=self._output_dir)
@@ -2521,8 +2533,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # 1. 弹出保存路径对话框
-        from pathlib import Path
-
         default_name = (
             "visual_" + Path(self._image_path).name
             if self._image_path
@@ -2538,7 +2548,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # 2. 创建扩展画布：左侧原图，右侧额外 60% 纯白区域用于图例
-        from PyQt5 import QtGui, QtCore
 
         orig_w = self._image.width()
         orig_h = self._image.height()
@@ -2872,24 +2881,5 @@ def _scan_image_files(root_dir: str) -> list[str]:
         return natsort.natsorted(images)
 
 
-# 添加我们自己的标签列表展示
-def format_shape_label(shape: Shape) -> str:
-    node_id = getattr(shape, "node_id", "")
-    label_type = shape.label or ""
-    group_id = shape.group_id if shape.group_id is not None else ""
-    transcription_semantic = getattr(shape, "transcription_semantic", "")
-    transcription_raw = getattr(shape, "transcription_raw", "")
-    transcription = transcription_semantic or transcription_raw
+# 标签列表展示方法统一从 label_list_widget 导入，不再在此重复定义
 
-    parts = []
-    if node_id:
-        parts.append(str(node_id))
-    if label_type:
-        parts.append(str(label_type))
-    if group_id != "":
-        parts.append(str(group_id))
-    if transcription:
-        t_str = str(transcription).replace("\n", " ")
-        parts.append(t_str[:15] + ("..." if len(t_str) > 15 else ""))
-
-    return " | ".join(parts) if parts else "Unnamed"

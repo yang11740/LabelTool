@@ -110,10 +110,10 @@ class HTMLDelegate(QtWidgets.QStyledItemDelegate):
             self.initStyleOption(opt, index)
             doc = QtGui.QTextDocument()
             doc.setHtml(opt.text)
-            height = int(doc.size().height()) - VERT_FUDGE
+            height = max(0, int(doc.size().height()) - VERT_FUDGE)
             return QtCore.QSize(int(doc.idealWidth()), height)
         doc = QtGui.QTextDocument()
-        height = int(doc.size().height()) - VERT_FUDGE
+        height = max(0, int(doc.size().height()) - VERT_FUDGE)
         return QtCore.QSize(int(doc.idealWidth()), height)
 
 
